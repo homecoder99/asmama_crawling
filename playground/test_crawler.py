@@ -52,23 +52,12 @@ async def test_single_product(branduid: str, output_dir: str = "playground/resul
             
             if result:
                 print("✅ 크롤링 성공!")
-                print(f"📄 제품명: {result.get('name', 'N/A')}")
+                print(f"📄 제품명: {result.get('item_name', 'N/A')}")
                 print(f"💰 가격: {result.get('price', 'N/A')}")
-                print(f"🎨 옵션 수: {len(result.get('options', []))}")
-                print(f"🖼️  이미지 수: {len(result.get('image_urls', []))}")
+                print(f"🎨 옵션 수: {len(result.get('option_info', []))}")
+                print(f"🖼️  이미지 수: {len(result.get('images', []))}")
                 print(f"💾 저장 위치: {storage_path}")
-                
-                # 상세 정보 출력
-                if result.get('options'):
-                    print(f"🔧 옵션: {', '.join(result['options'])}")
-                
-                if result.get('image_urls'):
-                    print("🖼️  이미지 URL 샘플:")
-                    for i, url in enumerate(result['image_urls'][:3]):
-                        print(f"   {i+1}. {url}")
-                    if len(result['image_urls']) > 3:
-                        print(f"   ... 외 {len(result['image_urls']) - 3}개")
-                
+
             else:
                 print("❌ 크롤링 실패")
                 print("🔍 로그 파일을 확인하여 상세 오류를 확인하세요")
@@ -91,7 +80,7 @@ def test_crawler_initialization():
         
         # 커스텀 설정
         storage = JSONStorage("playground/results/test_init.json")
-        crawler_custom = AsmamaCrawler(storage=storage, max_workers=2)
+        crawler_custom = AsmamaCrawler(storage=storage, max_workers=1)
         print(f"✅ 커스텀 초기화 성공 (max_workers: {crawler_custom.max_workers})")
         
         return True

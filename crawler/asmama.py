@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 import traceback
 
 from .base import BaseCrawler
-from .utils import log_error, parse_price, clean_text, extract_options_from_text
+from .utils import log_error, parse_price, clean_text, extract_options_from_text, convert_country_to_code, extract_weight_numbers
 
 
 class AsmamaCrawler(BaseCrawler):
@@ -55,7 +55,7 @@ class AsmamaCrawler(BaseCrawler):
                 
                 # 제품 데이터 추출
                 product_data = await self._extract_product_data(page, branduid)
-                
+    
                 await context.close()
                 
                 if product_data:
@@ -155,7 +155,33 @@ class AsmamaCrawler(BaseCrawler):
     
     async def _extract_product_data(self, page, branduid: str) -> Optional[Dict[str, Any]]:
         """
-        제품 페이지에서 데이터를 추출한다.
+        제품 페이지에서 완전한 데이터 스키마를 추출한다.
+        
+        추출되는 데이터 필드:
+        - color: 제품 색상
+        - material: 제품 소재
+        - quantity: 수량/구성
+        - size: 제품 사이즈
+        - weight: 제품 중량
+        - unique_item_id: 고유 아이템 ID
+        - category_name: 카테고리명
+        - brand_name: 브랜드명
+        - item_name: 제품명
+        - related_cellab: 관련 셀랩 정보
+        - origin_price: 원가
+        - price: 판매가
+        - option_info: 옵션 정보
+        - images: 이미지 URL 목록
+        - origin_country: 제조국
+        - manufacturer: 제조사/판매처
+        - benefit_info: 혜택 정보
+        - shipping_info: 배송 정보
+        - is_discounted: 할인 여부
+        - is_soldout: 품절 여부
+        - is_option_available: 옵션 선택 가능 여부
+        - origin_product_url: 원본 제품 URL
+        - source: 데이터 소스
+        - others: 기타 정보
         
         Args:
             page: Playwright 페이지 인스턴스
@@ -166,63 +192,313 @@ class AsmamaCrawler(BaseCrawler):
         """
         try:
             # 페이지 로딩 대기
-            await asyncio.sleep(2)  # 안티봇 대응 지연
-            
-            # FIX ME: 실제 Asmama 사이트 구조에 맞게 셀렉터 수정 필요
-            # 현재는 일반적인 쇼핑몰 구조를 가정한 셀렉터 사용
-            
-            # 제품명 추출
-            name = await self.safe_get_text(page, 'h1, .product-title, .item-name, .product-name')
-            if not name:
-                name = await self.safe_get_text(page, 'title')
-            
-            # 가격 추출
-            price_text = await self.safe_get_text(page, '.price, .product-price, .item-price, .cost')
-            price = parse_price(price_text) if price_text else None
-            
-            # 옵션 추출
-            options_text = await self.safe_get_text(page, '.options, .product-options, .item-options')
-            options = extract_options_from_text(options_text) if options_text else []
-            
-            # 이미지 URL 추출
-            image_urls = []
-            image_elements = await page.query_selector_all('img')
-            for img in image_elements:
-                src = await img.get_attribute('src')
-                if src and ('.jpg' in src or '.png' in src or '.jpeg' in src or '.gif' in src):
-                    # 상대 URL을 절대 URL로 변환
-                    if src.startswith('/'):
-                        src = urljoin(self.BASE_URL, src)
-                    elif not src.startswith('http'):
-                        src = urljoin(self.BASE_URL, '/' + src)
-                    image_urls.append(src)
-            
-            # 중복 제거
-            image_urls = list(dict.fromkeys(image_urls))
-            
-            # 상세 HTML 추출
-            detail_html = ""
-            detail_element = await page.query_selector('.product-detail, .item-detail, .description')
-            if detail_element:
-                detail_html = await detail_element.inner_html()
-            else:
-                # 전체 페이지 HTML을 백업으로 사용
-                detail_html = await page.content()
-            
-            # FIX ME: 스키마 변경 시 아래 필드 구조 업데이트 필요
-            # 현재 스키마: branduid, name, price, options, image_urls, detail_html
+            from .utils import random_delay
+            await random_delay(1, 3)  # 안티봇 대응 지연
+
+            # 모든 필드를 기본값으로 초기화
             product_data = {
                 "branduid": branduid,
-                "name": clean_text(name) if name else "",
-                "price": price,
-                "options": options,
-                "image_urls": image_urls,
-                "detail_html": detail_html
+                "color": "",
+                "material": "",
+                "quantity": "",
+                "size": "",
+                "weight": "",
+                "summary_description": "",
+                "unique_item_id": branduid,  # branduid를 unique_item_id로 사용
+                "category_name": "",
+                "brand_name": "asmama",  # 기본 브랜드명
+                "item_name": "",
+                "related_cellab": "",
+                "origin_price": "",
+                "price": "",
+                "option_info": [],
+                "images": [],
+                "origin_country": "",
+                "manufacturer": "",
+                "benefit_info": "",
+                "shipping_info": "",
+                "is_discounted": False,
+                "is_soldout": False,
+                "is_option_available": False,
+                "origin_product_url": f"http://www.asmama.com/shop/shopdetail.html?branduid={branduid}",
+                "source": "asmama",
+                "others": ""
             }
+
+            # 요약 설명 추출 (df-detail-fixed-box)
+            try:
+                summary_desc = page.locator('div.infoArea div.df-detail-fixed-box div.df-summary-desc')
+                if await summary_desc.count() > 0:
+                    product_data["summary_description"] = (await summary_desc.inner_text()).strip()
+            except Exception as e:
+                self.logger.debug(f"요약 설명 추출 실패: {str(e)}")
+
+            # 가격, 적립금, 셀럽 정보 추출 (df-detail-fixed-box > xans-product-detaildesign 테이블)
+            try:
+                detail_table_rows = page.locator('div.infoArea div.df-detail-fixed-box div.xans-product-detaildesign table tbody tr')
+                row_count = await detail_table_rows.count()
+                
+                for i in range(row_count):
+                    row = detail_table_rows.nth(i)
+                    th_element = row.locator('th').first
+                    td_element = row.locator('td').first
+                    
+                    if await th_element.count() > 0 and await td_element.count() > 0:
+                        th_text = (await th_element.inner_text()).strip()
+                        td_text = (await td_element.inner_text()).strip()
+                        
+                        # 가격 정보 처리
+                        if "판매가격" in th_text:
+                            # 숫자만 추출
+                            price_numbers = ''.join(filter(str.isdigit, td_text))
+                            if price_numbers:
+                                product_data["price"] = int(price_numbers)
+                                product_data["origin_price"] = int(price_numbers)
+                        
+                        # 할인가격 처리
+                        elif "할인" in th_text:
+                            discount_numbers = ''.join(filter(str.isdigit, td_text))
+                            if discount_numbers:
+                                product_data["price"] = int(discount_numbers)
+                                product_data["is_discounted"] = True
+                        
+                        # 적립금 처리
+                        elif "적립금" in th_text:
+                            product_data["benefit_info"] = td_text
+                        
+                        # 셀럽 정보 처리
+                        elif "CELEB" in th_text:
+                            product_data["related_cellab"] = td_text
+                            
+            except Exception as e:
+                self.logger.debug(f"상품 상세 테이블 추출 실패: {str(e)}")
+
+            # 기본 정보 테이블에서 데이터 추출 (df-detail-area > ec-base-table2)
+            try:
+                base_table_rows = page.locator('div#df-detail-area div.ec-base-table2 table tbody tr')
+                row_count = await base_table_rows.count()
+                
+                # 텍스트와 필드명 매핑
+                field_mapping = {
+                    "제품명": "item_name",
+                    "색상": "color", 
+                    "소재": "material",
+                    "수량": "quantity",
+                    "사이즈": "size",
+                    "중량": "weight",
+                    "제조국": "origin_country",
+                    "판매처": "manufacturer"
+                }
+                
+                for i in range(row_count):
+                    row = base_table_rows.nth(i)
+                    th_element = row.locator('th').first
+                    td_element = row.locator('td').first
+                    
+                    if await th_element.count() > 0 and await td_element.count() > 0:
+                        th_text = (await th_element.inner_text()).strip()
+                        td_text = (await td_element.inner_text()).strip()
+                        
+                        # 텍스트 매칭으로 필드 찾기
+                        for key_text, field_name in field_mapping.items():
+                            if key_text in th_text:
+                                # 제조국의 경우 국가 코드로 변환
+                                if field_name == "origin_country":
+                                    product_data[field_name] = convert_country_to_code(td_text)
+                                    self.logger.debug(f"제조국 코드 변환: {td_text} -> {product_data[field_name]}")
+                                # 중량의 경우 숫자만 추출
+                                elif field_name == "weight":
+                                    product_data[field_name] = extract_weight_numbers(td_text)
+                                    self.logger.debug(f"중량 숫자 추출: {td_text} -> {product_data[field_name]}")
+                                else:
+                                    product_data[field_name] = td_text
+                                    self.logger.debug(f"추출 성공 ({field_name}): {td_text}")
+                                break
+                                
+            except Exception as e:
+                self.logger.debug(f"기본 정보 테이블 추출 실패: {str(e)}")
+
+            # 옵션 정보 추출 (지정된 형식으로 변환)
+            try:
+                option_list = page.locator('div.infoArea div.df-detail-fixed-box ul.xans-product-option li.xans-product-option')
+                select_count = await option_list.count()
+                
+                if select_count > 0:
+                    product_data["is_option_available"] = True
+                    option_strings = []
+                    
+                    for i in range(select_count):
+                        select_element = option_list.nth(i).locator('select[name*="optionlist"]')
+                        
+                        # 옵션명 추출 (label 속성에서)
+                        option_name = await select_element.get_attribute('label') or f"옵션{i+1}"
+                        
+                        # 옵션값들 추출 - value가 빈 문자열이 아닌 것들
+                        options = await select_element.locator('option').all()
+                        
+                        for option in options:
+                            option_text = (await option.inner_text()).strip()
+                            if option_text and option_text != "옵션 선택" and (await option.get_attribute('sto_state') == "SALE"):
+                                option_value = await option.get_attribute('value')
+                                if not option_value or option_value == "":
+                                    continue
+                                
+                                # 가격 정보 추출
+                                price_attr = await option.get_attribute('org_opt_price')
+                                stock_attr = "200"
+                                sto_id = product_data["brand_name"] + "_" + product_data["unique_item_id"] + "_" + await option.get_attribute('sto_id') or "0"
+                                
+                                # 형식: 옵션명||*옵션값||*옵션가격||*재고수량||*판매자옵션코드$$
+                                option_string = f"{option_name}||*{option_text}||*{price_attr}||*{stock_attr}||*{sto_id}"
+                                option_strings.append(option_string)
+                                
+                    # $$ 구분자로 연결
+                    if option_strings:
+                        product_data["option_info"] = "$$".join(option_strings)
+                    else:
+                        product_data["is_option_available"] = False
+                        
+            except Exception as e:
+                self.logger.debug(f"옵션 정보 추출 실패: {str(e)}")
+
+            # 구매 버튼으로 품절 상태 확인
+            try:
+                buy_button = page.locator('div.infoArea div.df-detail-fixed-box div.xans-product-action .btn.buy').first
+                if await buy_button.count() == 0:
+                    # 버튼이 없으면 품절
+                    # FIXME: 실제 검증 필요
+                    product_data["is_soldout"] = True
+                    
+            except Exception as e:
+                self.logger.debug(f"구매 버튼 분석 실패: {str(e)}")
             
-            # 필수 데이터 검증
-            if not product_data["name"] and not product_data["detail_html"]:
-                return None
+            # 카테고리 분류 (상품명 기반)
+            try:
+                item_name = product_data.get("item_name", "").lower()
+                
+                # 카테고리 키워드 매핑
+                category_mapping = {
+                    "팔찌": ["팔찌"],
+                    "귀찌": ["귀찌", "이어커프", "피어싱"],
+                    "귀걸이": ["귀걸이", "이어링"],
+                    "반지": ["반지", "링"],
+                    "목걸이": ["목걸이", "체인", "펜던트"],
+                    "헤어핀": ["헤어핀", "집게핀", "헤어후크", "헤어비녀"],
+                    "헤어밴드": ["헤어밴드", "머리띠"],
+                    "헤어끈": ["헤어끈", "포니테일", "스크런치"]
+                }
+                
+                # 키워드 매칭으로 카테고리 분류
+                matched_category = ""
+                for category, keywords in category_mapping.items():
+                    for keyword in keywords:
+                        if keyword in item_name:
+                            matched_category = category
+                            break
+                    if matched_category:
+                        break
+                
+                product_data["category_name"] = matched_category
+                self.logger.debug(f"카테고리 분류: {item_name} -> {matched_category}")
+                
+            except Exception as e:
+                self.logger.debug(f"카테고리 분류 실패: {str(e)}")
+
+            # 배송/결제/반품 정보 추출 (detail-guide)
+            try:
+                guide_sections = page.locator('div.detail-guide div.section')
+                section_count = await guide_sections.count()
+                
+                others_info = {}
+                
+                for i in range(section_count):
+                    section = guide_sections.nth(i)
+                    
+                    # 섹션 제목 추출
+                    title_element = section.locator('h3').first
+                    content_element = section.locator('div.df-cont').first
+                    
+                    if await title_element.count() > 0 and await content_element.count() > 0:
+                        title_text = (await title_element.inner_text()).strip()
+                        content_text = (await content_element.inner_text()).strip()
+                        
+                        # 배송정보 처리
+                        if "배송정보" in title_text:
+                            # 배송비, 기간, 택배사 추출
+                            shipping_parts = []
+                            
+                            # 택배사 추출
+                            if "CJ 대한통운" in content_text:
+                                shipping_parts.append("택배사: CJ 대한통운")
+                            
+                            # 배송료 추출
+                            if "배송료" in content_text:
+                                lines = content_text.split('\n')
+                                for line in lines:
+                                    if "배송료" in line:
+                                        shipping_parts.append(line.strip())
+                                        break
+                            
+                            # 배송기간 추출
+                            if "배송기간" in content_text:
+                                lines = content_text.split('\n')
+                                for line in lines:
+                                    if "배송기간" in line:
+                                        shipping_parts.append(line.strip())
+                                        break
+                            
+                            product_data["shipping_info"] = " | ".join(shipping_parts)
+                            
+                        # 결제정보와 반품정보는 others에 저장
+                        elif "결제정보" in title_text:
+                            others_info["payment_info"] = content_text
+                        elif "반품" in title_text or "교환" in title_text:
+                            others_info["return_info"] = content_text
+                
+                # others 필드에 추가 정보 저장 (텍스트 형식)
+                if others_info:
+                    others_text = []
+                    for key, value in others_info.items():
+                        if key == "payment_info":
+                            others_text.append(f"[결제정보] {value}")
+                        elif key == "return_info":
+                            others_text.append(f"[교환/반품정보] {value}")
+                    product_data["others"] = " | ".join(others_text)
+                    
+            except Exception as e:
+                self.logger.debug(f"상세 가이드 정보 추출 실패: {str(e)}")
+
+            # 이미지 URL 추출
+            try:
+                image_urls = []
+                
+                # 1. 썸네일 이미지 추출 (imgArea)
+                thumbnail_img = page.locator('div.imgArea div.keyImg div.thumbnail span.detail-image img.detail_image').first
+                if await thumbnail_img.count() > 0:
+                    thumbnail_src = await thumbnail_img.get_attribute('src')
+                    if thumbnail_src:
+                        # 상대경로를 절대경로로 변환
+                        if thumbnail_src.startswith('/'):
+                            thumbnail_src = f"http://www.asmama.com{thumbnail_src}"
+                        image_urls.append(thumbnail_src)
+                        self.logger.debug(f"썸네일 이미지 추출: {thumbnail_src}")
+                
+                # 2. 상세 이미지들 추출 (상품상세페이지 본문)
+                detail_imgs = page.locator('div#df-detail-area div.cont img[src*="asmamaybs.openhost.cafe24.com"]')
+                detail_count = await detail_imgs.count()
+                
+                for i in range(detail_count):
+                    img = detail_imgs.nth(i)
+                    img_src = await img.get_attribute('src')
+                    if img_src and img_src not in image_urls:
+                        image_urls.append(img_src)
+                        self.logger.debug(f"상세 이미지 추출: {img_src}")
+                
+                product_data["images"] = image_urls
+                self.logger.debug(f"총 {len(image_urls)}개 이미지 추출 완료")
+                
+            except Exception as e:
+                self.logger.debug(f"이미지 URL 추출 실패: {str(e)}")
             
             return product_data
             

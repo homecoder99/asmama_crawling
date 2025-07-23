@@ -27,7 +27,10 @@ class BaseCrawler(ABC):
         """
         self.storage = storage
         self.max_workers = max_workers
-        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # 로거 설정 - setup_logger와 동일한 핸들러 사용
+        from .utils import setup_logger
+        self.logger = setup_logger(self.__class__.__name__)
         
         # Playwright 관련 변수
         self.playwright: Optional[Playwright] = None
