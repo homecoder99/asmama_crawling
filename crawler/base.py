@@ -53,7 +53,7 @@ class BaseCrawler(ABC):
         try:
             self.playwright = await async_playwright().start()
             self.browser = await self.playwright.chromium.launch(
-                headless=True,
+                headless=False,
                 args=['--no-sandbox', '--disable-setuid-sandbox']
             )
             self.logger.info("브라우저 초기화 완료")
@@ -177,14 +177,14 @@ class BaseCrawler(ABC):
         page = await context.new_page()
         return page
         
-    async def safe_goto(self, page: Page, url: str, timeout: int = 30000) -> bool:
+    async def safe_goto(self, page: Page, url: str, timeout: int = 60000) -> bool:
         """
         안전하게 페이지로 이동한다.
         
         Args:
             page: 페이지 인스턴스
             url: 이동할 URL
-            timeout: 타임아웃 (밀리초)
+            timeout: 타임아웃 (밀리초, 기본값 60초)
             
         Returns:
             성공 여부

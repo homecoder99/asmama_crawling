@@ -60,9 +60,6 @@ class AsmamaCrawler(BaseCrawler):
                 
                 if product_data:
                     self.logger.info(f"제품 크롤링 성공: {branduid} - {product_data['item_name']}")
-                    # 데이터 저장
-                    if self.storage:
-                        self.storage.save(product_data)
                 else:
                     log_error(self.logger, branduid, "제품 데이터 추출 실패", None)
                 
@@ -117,6 +114,15 @@ class AsmamaCrawler(BaseCrawler):
                 
                 all_products.extend(batch_products)
                 self.logger.info(f"배치 {batch_num} 완료: {len(batch_products)}/{len(batch)}개 성공")
+                
+                # 배치 완료 시마다 Excel 파일로 저장
+                if batch_products and self.storage:
+                    try:
+                        # 배치별 저장 (누적 데이터)
+                        self.storage.save(all_products)
+                        self.logger.info(f"배치 {batch_num} 데이터 저장 완료 (총 {len(all_products)}개)")
+                    except Exception as save_error:
+                        self.logger.error(f"배치 {batch_num} 저장 실패: {str(save_error)}")
                 
                 # 배치 간 휴식 (서버 부담 경감)
                 if i + batch_size < len(branduid_list):
@@ -326,45 +332,67 @@ class AsmamaCrawler(BaseCrawler):
                 base_table_rows = page.locator('div#df-detail-area div.ec-base-table2 table tbody tr')
                 row_count = await base_table_rows.count()
                 
-                # 텍스트와 필드명 매핑
-                field_mapping = {
-                    "제품명": "item_name",
-                    "색상": "color", 
-                    "소재": "material",
-                    "수량": "quantity",
-                    "사이즈": "size",
-                    "중량": "weight",
-                    "제조국": "origin_country",
-                    "판매처": "manufacturer"
-                }
-                
-                for i in range(row_count):
-                    row = base_table_rows.nth(i)
-                    th_element = row.locator('th').first
-                    td_element = row.locator('td').first
+                if row_count > 0:
+                    # 테이블이 있는 경우 기존 로직 사용
+                    # 텍스트와 필드명 매핑
+                    field_mapping = {
+                        "제품명": "item_name",
+                        "색상": "color", 
+                        "소재": "material",
+                        "수량": "quantity",
+                        "사이즈": "size",
+                        "중량": "weight",
+                        "제조국": "origin_country",
+                        "판매처": "manufacturer"
+                    }
                     
-                    if await th_element.count() > 0 and await td_element.count() > 0:
-                        th_text = (await th_element.inner_text()).strip()
-                        td_text = (await td_element.inner_text()).strip()
+                    for i in range(row_count):
+                        row = base_table_rows.nth(i)
+                        th_element = row.locator('th').first
+                        td_element = row.locator('td').first
                         
-                        # 텍스트 매칭으로 필드 찾기
-                        for key_text, field_name in field_mapping.items():
-                            if key_text in th_text:
-                                # 제조국의 경우 국가 코드로 변환
-                                if field_name == "origin_country":
-                                    product_data[field_name] = convert_country_to_code(td_text)
-                                    self.logger.debug(f"제조국 코드 변환: {td_text} -> {product_data[field_name]}")
-                                # 중량의 경우 숫자만 추출
-                                elif field_name == "weight":
-                                    product_data[field_name] = extract_weight_numbers(td_text)
-                                    self.logger.debug(f"중량 숫자 추출: {td_text} -> {product_data[field_name]}")
-                                else:
-                                    product_data[field_name] = td_text
-                                    self.logger.debug(f"추출 성공 ({field_name}): {td_text}")
-                                break
+                        if await th_element.count() > 0 and await td_element.count() > 0:
+                            th_text = (await th_element.inner_text()).strip()
+                            td_text = (await td_element.inner_text()).strip()
+                            
+                            # 텍스트 매칭으로 필드 찾기
+                            for key_text, field_name in field_mapping.items():
+                                if key_text in th_text:
+                                    # 제조국의 경우 국가 코드로 변환
+                                    if field_name == "origin_country":
+                                        product_data[field_name] = convert_country_to_code(td_text)
+                                        self.logger.debug(f"제조국 코드 변환: {td_text} -> {product_data[field_name]}")
+                                    # 중량의 경우 숫자만 추출
+                                    elif field_name == "weight":
+                                        product_data[field_name] = extract_weight_numbers(td_text)
+                                        self.logger.debug(f"중량 숫자 추출: {td_text} -> {product_data[field_name]}")
+                                    else:
+                                        product_data[field_name] = td_text
+                                        self.logger.debug(f"추출 성공 ({field_name}): {td_text}")
+                                    break
+                else:
+                    # 테이블이 없는 경우 h2에서 상품명 추출 (fallback)
+                    self.logger.debug("기본 정보 테이블이 없음, h2에서 상품명 추출 시도")
+                    h2_element = page.locator('div.infoArea div.headingArea h2')
+                    if await h2_element.count() > 0:
+                        item_name = (await h2_element.inner_text()).strip()
+                        if item_name:
+                            product_data["item_name"] = item_name
+                            self.logger.debug(f"h2에서 상품명 추출 성공: {item_name}")
                                 
             except Exception as e:
                 self.logger.debug(f"기본 정보 테이블 추출 실패: {str(e)}")
+                
+                # 예외 발생 시에도 h2에서 상품명 추출 시도
+                try:
+                    h2_element = page.locator('h2').first
+                    if await h2_element.count() > 0:
+                        item_name = (await h2_element.inner_text()).strip()
+                        if item_name:
+                            product_data["item_name"] = item_name
+                            self.logger.debug(f"예외 처리 중 h2에서 상품명 추출: {item_name}")
+                except Exception as fallback_error:
+                    self.logger.debug(f"fallback 상품명 추출도 실패: {str(fallback_error)}")
 
             # 옵션 정보 추출 (지정된 형식으로 변환)
             try:

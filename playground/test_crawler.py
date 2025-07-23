@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from crawler.asmama import AsmamaCrawler
-from crawler.storage import JSONStorage
+from crawler.storage import JSONStorage, ExcelStorage
 from crawler.utils import setup_logger
 
 logger = setup_logger(__name__)
@@ -31,27 +31,29 @@ async def test_crawl_from_list(list_url: str, output_dir: str = "playground/resu
     # 결과 디렉토리 생성
     results_dir = Path(output_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Excel 저장소 설정
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    storage_path = results_dir / f"asmama_crawl_{timestamp}.xlsx"
+    storage = ExcelStorage(str(storage_path))
 
-    # 크롤러 초기화
-    crawler = AsmamaCrawler(max_workers=1)
+    # 크롤러 초기화 (Excel 저장소 포함)
+    crawler = AsmamaCrawler(storage=storage, max_workers=1)
     
     try:
         async with crawler:
             print("📡 브라우저 초기화 완료")
+            print(f"📁 Excel 파일 저장 경로: {storage_path}")
             
             # branduid 목록 크롤링
             branduid_list = await crawler.crawl_branduid_list(list_url)
 
-            # branduid 목록에서 제품 크롤링
+            # branduid 목록에서 제품 크롤링 (배치별 자동 저장)
             product_data = await crawler.crawl_from_branduid_list(branduid_list)
             
             print(f"🔍 총 {len(product_data)}개 제품 크롤링 완료")
-
-            # 저장소 설정
-            url_name = "_".join(urlparse(list_url).path.split("/")) + "_" + urlparse(list_url).query
-            storage_path = results_dir / f"test_list{url_name}.json"
-            storage = JSONStorage(str(storage_path))
-            storage.save(product_data)
+            print(f"💾 최종 데이터가 {storage_path}에 저장되었습니다")
 
     except Exception as e:
         print(f"💥 크롤러 실행 중 오류 발생: {str(e)}")

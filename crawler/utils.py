@@ -91,7 +91,7 @@ def get_random_viewport() -> dict:
     return random.choice(viewports)
 
 
-async def random_delay(min_seconds: float = 1.0, max_seconds: float = 3.0) -> None:
+async def random_delay(min_seconds: float = 2.0, max_seconds: float = 3.0) -> None:
     """
     랜덤한 시간 동안 비동기 대기한다.
     
