@@ -22,7 +22,7 @@ from crawler.utils import setup_logger
 
 logger = setup_logger(__name__)
 
-async def test_crawl_from_list(list_url: str, output_dir: str = "playground/results"):
+async def test_crawl_branduid_list(list_url: str, output_dir: str = "playground/results"):
     """
     리스트 페이지 크롤링 테스트.
     """
@@ -236,7 +236,7 @@ def main():
         sys.exit(1)
     
     # 제품 크롤링 테스트
-    asyncio.run(test_crawl_from_list(args.list_url, args.output_dir))
+    asyncio.run(test_crawl_branduid_list(args.list_url, args.output_dir))
 
 
 if __name__ == "__main__":
