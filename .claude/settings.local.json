@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__taskmaster-ai__add_task",
+      "mcp__taskmaster-ai__get_tasks",
+      "mcp__taskmaster-ai__set_task_status"
+    ],
+    "deny": []
+  }
+}

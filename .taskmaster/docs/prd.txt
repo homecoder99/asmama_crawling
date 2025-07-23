@@ -1,0 +1,98 @@
+# Asmama 크롤러 프로젝트 요구사항 명세서
+
+## 프로젝트 개요
+Playwright 기반의 모듈형 웹 크롤러를 구축하여 http://www.asmama.com/shop/shopdetail.html?branduid={branduid} 사이트에서 제품 데이터를 수집하고, Excel 파일로 저장하며, 완전한 테스트와 CLI 자동화를 제공합니다.
+
+## 핵심 목표
+1. Playwright를 사용한 안정적인 웹 크롤링 시스템 구축
+2. Excel 파일 저장 (PostgreSQL 호환 스키마)
+3. 완전한 로깅 시스템
+4. 포괄적인 테스트 커버리지
+5. CLI 및 Makefile을 통한 쉬운 실행
+
+## 기술 요구사항
+
+### 개발 환경
+- Python 3 (context7 MCP 서버 호환)
+- Playwright (Python 바인딩)
+- pytest 테스트 프레임워크
+- Excel 저장을 위한 라이브러리
+
+### 안티봇 대응
+- 랜덤 User-Agent 사용
+- 랜덤 viewport 크기
+- 1-3초 랜덤 지연
+- 최대 3개 동시 세션
+- 쿠키 재사용
+
+### 데이터 스키마
+현재 스키마 (향후 변경 예정):
+- branduid: string
+- name: string  
+- price: int
+- options: string 배열
+- image_urls: string 배열
+- detail_html: string
+
+### 로깅 요구사항
+- logs/crawl_{timestamp}.log 형식
+- 실패 시 JSON 라인 형식: {branduid, reason, trace}
+- 모든 성공/실패 기록
+
+## 프로젝트 구조
+
+### 디렉토리 구조
+- crawler/: 크롤러 핵심 코드
+  - base.py: 베이스 크롤러 클래스
+  - asmama.py: Asmama 전용 크롤러
+  - storage.py: 저장소 인터페이스 (Excel/DB)
+  - utils.py: 유틸리티 함수
+- playground/: Python 스크립트 플레이그라운드
+- tests/: 단위 및 통합 테스트
+- logs/: 크롤링 로그 (자동 생성)
+- Makefile: CLI 명령어
+
+### 코드 규칙
+- PEP-8 스타일 가이드
+- 타입 힌트 필수
+- 한국어 docstring 필수
+- 상속 구조: BaseCrawler → AsmamaCrawler
+- 의존성 주입 패턴
+
+## 주요 기능
+
+### 크롤링 기능
+1. 리스트 페이지에서 제품 목록 수집
+2. 상세 페이지로 이동하여 데이터 추출
+3. 이미지 URL 수집
+4. 옵션 정보 파싱
+5. HTML 콘텐츠 저장
+
+### 저장 기능
+1. Excel 파일로 즉시 저장
+2. PostgreSQL 마이그레이션 준비
+3. 스키마 변경 대비 모듈화
+
+### 테스트 기능
+1. 단위 테스트 (mocking)
+2. 통합 테스트
+3. 플레이그라운드 스크립트
+
+### CLI 기능
+- make crawl: 크롤링 실행
+- make test: 테스트 실행
+- make clean: 정리
+
+## 수락 기준
+1. make crawl 실행 시 30개 이상 아이템 수집
+2. 로그 파일에 INFO와 ERROR 기록 포함
+3. make test 성공 (exit 0)
+4. README로 10분 내 설정 및 실행 가능
+5. 모든 함수에 한국어 docstring
+6. 스키마 관련 코드에 FIX ME 주석
+
+## 특별 요구사항
+1. context7 MCP 서버 완전 호환
+2. 프로덕션 레디 README.md
+3. 원클릭 실행 Makefile
+4. 스키마 변경 대비 주석

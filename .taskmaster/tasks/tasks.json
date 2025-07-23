@@ -1,0 +1,184 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "프로젝트 기본 구조 설정",
+        "description": "크롤러 프로젝트의 디렉토리 구조를 생성하고 기본 파일들을 초기화합니다.",
+        "details": "다음 디렉토리와 파일들을 생성합니다:\n- crawler/ (base.py, asmama.py, storage.py, utils.py, __init__.py)\n- tests/ (test_asmama_unit.py, test_asmama_integration.py, __init__.py)\n- notebooks/ (asmama_playground.ipynb)\n- logs/ (자동 생성 디렉토리)\n- results/ (Excel 파일 저장용)\n- Makefile\n- requirements.txt\n- README.md\n- .env.example",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 2,
+        "title": "크롤러 베이스 클래스 구현",
+        "description": "모든 크롤러가 상속받을 베이스 클래스를 구현합니다.",
+        "details": "base.py 파일에 다음 기능을 구현:\n- 추상 베이스 클래스 정의\n- Playwright 브라우저 초기화 및 관리\n- 공통 크롤링 메서드 (페이지 로드, 대기 등)\n- 에러 핸들링 및 재시도 로직\n- 로깅 인터페이스\n- 한국어 docstring 작성",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          1
+        ],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 3,
+        "title": "Asmama 전용 크롤러 구현",
+        "description": "Asmama 웹사이트를 위한 구체적인 크롤러 구현체를 개발합니다.",
+        "details": "asmama.py 파일에 다음 기능 구현:\n- BaseCrawler 상속\n- 제품 리스트 페이지 크롤링\n- 상세 페이지 데이터 추출 (이름, 가격, 옵션, 이미지 URL, HTML)\n- 안티봇 대응 (랜덤 UA, viewport, 지연)\n- 동시성 제어 (최대 3개 세션)\n- 쿠키 재사용 로직\n- 스키마 관련 코드에 FIX ME 주석\n- 한국어 docstring",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          2
+        ],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 4,
+        "title": "저장소 인터페이스 구현",
+        "description": "Excel 파일 저장 및 향후 PostgreSQL 마이그레이션을 위한 저장소 계층을 구현합니다.",
+        "details": "storage.py 파일에 다음 구현:\n- 추상 Storage 인터페이스 정의\n- ExcelStorage 클래스 구현 (openpyxl 사용)\n- PostgreSQL 스텁 클래스 준비\n- 스키마 정의 (FIX ME 주석 포함)\n- results/YYYYMMDD_asmama.xlsx 형식으로 저장\n- 데이터 유효성 검증\n- 한국어 docstring",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          1
+        ],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 5,
+        "title": "유틸리티 함수 및 로깅 시스템 구현",
+        "description": "공통 유틸리티 함수와 구조화된 로깅 시스템을 구현합니다.",
+        "details": "utils.py 파일에 다음 구현:\n- 랜덤 User-Agent 생성기\n- 랜덤 viewport 크기 생성기\n- 랜덤 지연 함수 (1-3초)\n- 로깅 설정 (logs/crawl_{timestamp}.log)\n- JSON 라인 형식 에러 로깅\n- 날짜/시간 유틸리티\n- 파일 경로 유틸리티\n- 한국어 docstring",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          1
+        ],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 6,
+        "title": "단위 테스트 작성",
+        "description": "크롤러 컴포넌트들의 단위 테스트를 작성합니다.",
+        "details": "test_asmama_unit.py 파일에 다음 테스트 구현:\n- BaseCrawler 메서드 테스트\n- AsmamaCrawler 파싱 로직 테스트\n- Storage 인터페이스 테스트\n- 유틸리티 함수 테스트\n- Mock 객체 사용 (네트워크 호출 제외)\n- pytest 픽스처 활용\n- 한국어 docstring",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 7,
+        "title": "통합 테스트 작성",
+        "description": "전체 크롤링 프로세스의 통합 테스트를 작성합니다.",
+        "details": "test_asmama_integration.py 파일에 다음 구현:\n- 전체 크롤링 플로우 테스트\n- 실제 웹페이지 크롤링 테스트 (선택적)\n- Excel 파일 생성 검증\n- 로깅 동작 검증\n- pytest-playwright 활용\n- VCR.py로 네트워크 응답 캐싱 (선택적)\n- 한국어 docstring",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [
+          3,
+          4,
+          5
+        ],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 8,
+        "title": "Python 스크립트 플레이그라운드 생성",
+        "description": "개발자가 크롤러를 실험하고 테스트할 수 있는 Python 스크립트들을 생성합니다.",
+        "details": "playground/ 디렉토리에 다음 스크립트들 구현:\n- test_crawler.py: 크롤러 기본 기능 테스트 및 초기화 검증\n- test_selectors.py: CSS 셀렉터 실험 및 페이지 구조 분석\n- analyze_data.py: 크롤링 결과 데이터 분석 및 통계 생성\n- debug_session.py: 단계별 디버깅 세션 및 상태 모니터링\n- README.md: 플레이그라운드 사용 가이드 및 예제\n각 스크립트는 독립 실행 가능하며 CLI 인터페이스 제공, 한국어 docstring 필수",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          3,
+          4
+        ],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 9,
+        "title": "Makefile 및 CLI 자동화 구현",
+        "description": "원클릭 실행을 위한 Makefile과 CLI 명령어들을 구현합니다.",
+        "details": "Makefile에 다음 명령어 구현:\n- make install: 의존성 설치\n- make crawl: 크롤링 실행\n- make test: 전체 테스트 실행\n- make test-unit: 단위 테스트만\n- make test-integration: 통합 테스트만\n- make clean: 로그 및 임시 파일 정리\n- make help: 명령어 설명\n- 환경변수 처리",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          1
+        ],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 10,
+        "title": "README.md 작성",
+        "description": "프로젝트의 완전한 문서화를 위한 README 파일을 작성합니다.",
+        "details": "README.md에 다음 내용 포함:\n- 프로젝트 개요\n- 설치 가이드 (10분 내 완료 가능)\n- 빠른 시작 가이드\n- 사용법 예제\n- CLI 명령어 설명\n- 설정 옵션\n- 프로젝트 구조 설명\n- 확장 가이드\n- 트러블슈팅\n- 라이선스",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          9
+        ],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 11,
+        "title": "requirements.txt 및 설정 파일 생성",
+        "description": "프로젝트 의존성과 설정 파일들을 생성합니다.",
+        "details": "다음 파일들 생성:\n- requirements.txt: 모든 Python 의존성\n  - playwright\n  - openpyxl\n  - pytest\n  - pytest-playwright\n  - python-dotenv\n  - 기타 필요 라이브러리\n- .env.example: 환경변수 템플릿\n  - DB 연결 정보 (향후 사용)\n  - 크롤링 설정",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          1
+        ],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 12,
+        "title": "최종 테스트 및 검증",
+        "description": "전체 프로젝트의 동작을 검증하고 수락 기준을 만족하는지 확인합니다.",
+        "details": "다음 항목 검증:\n- make crawl로 30개 이상 아이템 수집 확인\n- 로그 파일에 INFO와 ERROR 기록 확인\n- make test 성공 (exit 0) 확인\n- README 따라 10분 내 설정 가능 확인\n- 모든 함수 한국어 docstring 확인\n- 스키마 관련 FIX ME 주석 확인\n- Playwright 브라우저 설치 확인\n- context7 MCP 호환성 확인",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "priority": "high",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "createdAt": "2025-07-23T00:00:00Z",
+      "updatedAt": "2025-07-23T00:00:00Z",
+      "currentTag": "master",
+      "created": "2025-07-23T07:05:27.920Z",
+      "description": "Tasks for master context",
+      "updated": "2025-07-23T08:16:53.005Z"
+    }
+  }
+}
