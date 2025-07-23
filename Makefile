@@ -4,9 +4,12 @@
 .DEFAULT_GOAL := help
 
 # Variables
-PYTHON := python3
-PIP := pip
-PYTEST := pytest
+PYTHON := source .venv/bin/activate && python
+PIP := source .venv/bin/activate && uv pip
+PYTEST := source .venv/bin/activate && pytest
+BLACK := source .venv/bin/activate && black
+FLAKE8 := source .venv/bin/activate && flake8
+MYPY := source .venv/bin/activate && mypy
 DATA_DIR := data
 LOGS_DIR := logs
 TEST_DIR := tests
@@ -24,6 +27,7 @@ help: ## 사용 가능한 명령어를 표시합니다
 
 install: ## 의존성을 설치합니다
 	@echo "의존성 설치 중..."
+	uv venv .venv
 	$(PIP) install -r requirements.txt
 	$(PYTHON) -m playwright install chromium
 	@echo "의존성 설치 완료!"
@@ -67,13 +71,13 @@ test-crawler: ## 크롤러 테스트만 실행합니다
 
 lint: ## 코드 품질 검사를 실행합니다
 	@echo "코드 품질 검사 중..."
-	flake8 crawler/ main.py --max-line-length=100
-	black --check crawler/ main.py
-	mypy crawler/ main.py
+	$(FLAKE8) crawler/ main.py --max-line-length=100
+	$(BLACK) --check crawler/ main.py
+	$(MYPY) crawler/ main.py
 
 format: ## 코드 포맷팅을 적용합니다
 	@echo "코드 포맷팅 적용 중..."
-	black crawler/ main.py
+	$(BLACK) crawler/ main.py
 
 clean: ## 로그 및 임시 파일을 정리합니다
 	@echo "파일 정리 중..."
@@ -123,10 +127,10 @@ ci: install lint test ## CI 파이프라인을 실행합니다
 install-help: ## 설치 관련 도움말을 표시합니다
 	@echo "설치 관련 도움말:"
 	@echo ""
-	@echo "1. Python 3.8+ 필요"
+	@echo "1. uv, Python 3.8+ 필요"
 	@echo "2. make install 실행"
 	@echo "3. make demo 로 테스트"
 	@echo ""
 	@echo "문제 해결:"
-	@echo "- Playwright 설치 실패 시: python -m playwright install chromium"
-	@echo "- 권한 문제 시: pip install --user -r requirements.txt"
+	@echo "- Playwright 설치 실패 시: source .venv/bin/activate && python -m playwright install chromium"
+	@echo "- 권한 문제 시: source .venv/bin/activate && uv pip install --user -r requirements.txt"
