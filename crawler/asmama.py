@@ -20,13 +20,13 @@ class AsmamaCrawler(BaseCrawler):
     BASE_URL = "http://www.asmama.com"
     PRODUCT_URL_TEMPLATE = "http://www.asmama.com/shop/shopdetail.html?branduid={branduid}"
     
-    def __init__(self, storage: Any = None, max_workers: int = 3):
+    def __init__(self, storage: Any = None, max_workers: int = 1):
         """
         Asmama 크롤러를 초기화한다.
         
         Args:
             storage: 데이터 저장소 인스턴스
-            max_workers: 최대 동시 세션 수 (안티봇 대응)
+            max_workers: 최대 동시 세션 수 (서버 부담 경감을 위해 기본값 1)
         """
         super().__init__(storage, max_workers)
         self.semaphore = asyncio.Semaphore(max_workers)  # 동시성 제어
@@ -59,7 +59,7 @@ class AsmamaCrawler(BaseCrawler):
                 await context.close()
                 
                 if product_data:
-                    self.logger.info(f"제품 크롤링 성공: {branduid}")
+                    self.logger.info(f"제품 크롤링 성공: {branduid} - {product_data['item_name']}")
                     # 데이터 저장
                     if self.storage:
                         self.storage.save(product_data)
@@ -73,52 +73,67 @@ class AsmamaCrawler(BaseCrawler):
                 log_error(self.logger, branduid, str(e), error_trace)
                 return None
     
-    async def crawl_from_list(
+    async def crawl_from_branduid_list(
         self, 
-        list_url: str, 
-        max_items: int = 100
+        branduid_list: List[str],
+        batch_size: int = 15
     ) -> List[Dict[str, Any]]:
         """
-        리스트 페이지에서 여러 제품을 크롤링한다.
+        branduid 목록에서 여러 제품을 배치 단위로 크롤링한다.
         
         Args:
-            list_url: 제품 리스트 페이지 URL
-            max_items: 최대 크롤링 아이템 수
+            branduid_list: branduid 목록
+            batch_size: 배치 크기 (서버 부담 경감을 위해 기본값 15)
             
         Returns:
             크롤링된 제품 데이터 목록
         """
         try:
-            # 리스트 페이지에서 branduid 목록 추출
-            branduid_list = await self._extract_branduid_list(list_url, max_items)
-            
             if not branduid_list:
-                self.logger.warning("리스트 페이지에서 제품 목록을 찾을 수 없음")
+                self.logger.warning("branduid 목록에서 제품 목록을 찾을 수 없음")
                 return []
             
-            self.logger.info(f"리스트에서 {len(branduid_list)}개 제품 발견")
+            self.logger.info(f"branduid 목록에서 {len(branduid_list)}개 제품 발견 (배치 크기: {batch_size})")
             
-            # 각 제품 크롤링 (동시성 제어 적용)
-            tasks = [self.crawl_single_product(branduid) for branduid in branduid_list]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            all_products = []
             
-            # 성공한 결과만 필터링
-            products = [
-                result for result in results 
-                if isinstance(result, dict) and result is not None
-            ]
+            # 배치 단위로 처리
+            for i in range(0, len(branduid_list), batch_size):
+                batch = branduid_list[i:i + batch_size]
+                batch_num = (i // batch_size) + 1
+                total_batches = (len(branduid_list) + batch_size - 1) // batch_size
+                
+                self.logger.info(f"배치 {batch_num}/{total_batches} 처리 중 ({len(batch)}개 제품)")
+                
+                # 각 제품 크롤링 (순차 처리, max_workers=1)
+                tasks = [self.crawl_single_product(branduid) for branduid in batch]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # 성공한 결과만 필터링
+                batch_products = [
+                    result for result in results 
+                    if isinstance(result, dict) and result is not None
+                ]
+                
+                all_products.extend(batch_products)
+                self.logger.info(f"배치 {batch_num} 완료: {len(batch_products)}/{len(batch)}개 성공")
+                
+                # 배치 간 휴식 (서버 부담 경감)
+                if i + batch_size < len(branduid_list):
+                    self.logger.info("다음 배치 처리를 위해 5초 대기 중...")
+                    await asyncio.sleep(5)
             
-            self.logger.info(f"리스트 크롤링 완료: {len(products)}/{len(branduid_list)}")
-            return products
+            self.logger.info(f"전체 크롤링 완료: {len(all_products)}/{len(branduid_list)}개 성공")
+            return all_products
         
         except Exception as e:
-            self.logger.error(f"리스트 크롤링 실패: {str(e)}", exc_info=True)
+            self.logger.error(f"branduid 목록 크롤링 실패: {str(e)}", exc_info=True)
             return []
         
     async def crawl_branduid_list(
         self, 
         list_url: str, 
-        max_items: int = 100
+        max_items: int = 1000
     ) -> List[Dict[str, Any]]:
         """
         branduid 목록을 크롤링한다.

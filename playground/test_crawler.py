@@ -22,6 +22,41 @@ from crawler.utils import setup_logger
 
 logger = setup_logger(__name__)
 
+async def test_crawl_from_list(list_url: str, output_dir: str = "playground/results"):
+    """
+    리스트 페이지 크롤링 테스트.
+    """
+    print(f"🔍 리스트 페이지 크롤링 테스트 시작: {list_url}")
+    
+    # 결과 디렉토리 생성
+    results_dir = Path(output_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    # 크롤러 초기화
+    crawler = AsmamaCrawler(max_workers=1)
+    
+    try:
+        async with crawler:
+            print("📡 브라우저 초기화 완료")
+            
+            # branduid 목록 크롤링
+            branduid_list = await crawler.crawl_branduid_list(list_url)
+
+            # branduid 목록에서 제품 크롤링
+            product_data = await crawler.crawl_from_branduid_list(branduid_list)
+            
+            print(f"🔍 총 {len(product_data)}개 제품 크롤링 완료")
+
+            # 저장소 설정
+            url_name = "_".join(urlparse(list_url).path.split("/")) + "_" + urlparse(list_url).query
+            storage_path = results_dir / f"test_list{url_name}.json"
+            storage = JSONStorage(str(storage_path))
+            storage.save(product_data)
+
+    except Exception as e:
+        print(f"💥 크롤러 실행 중 오류 발생: {str(e)}")
+        logger.error(f"크롤러 테스트 실패: {str(e)}", exc_info=True)
+
 async def test_crawl_branduid_list(list_url: str, output_dir: str = "playground/results"):
     """
     리스트 페이지 크롤링 테스트.
@@ -236,7 +271,7 @@ def main():
         sys.exit(1)
     
     # 제품 크롤링 테스트
-    asyncio.run(test_crawl_branduid_list(args.list_url, args.output_dir))
+    asyncio.run(test_crawl_from_list(args.list_url, args.output_dir))
 
 
 if __name__ == "__main__":
