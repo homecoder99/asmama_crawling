@@ -11,6 +11,7 @@ import sys
 import argparse
 import asyncio
 from pathlib import Path
+from urllib.parse import urlparse
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -21,6 +22,40 @@ from crawler.utils import setup_logger
 
 logger = setup_logger(__name__)
 
+async def test_crawl_from_list(list_url: str, output_dir: str = "playground/results"):
+    """
+    리스트 페이지 크롤링 테스트.
+    """
+    print(f"🔍 리스트 페이지 크롤링 테스트 시작: {list_url}")
+    
+    # 결과 디렉토리 생성
+    results_dir = Path(output_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    
+    url_name = "_".join(urlparse(list_url).path.split("/")) + "_" + urlparse(list_url).query
+
+    # 저장소 설정
+    storage_path = results_dir / f"test_list{url_name}.json"
+    storage = JSONStorage(str(storage_path))
+
+    # 크롤러 초기화
+    crawler = AsmamaCrawler(storage=storage, max_workers=1)
+    
+    try:
+        async with crawler:
+            print("📡 브라우저 초기화 완료")
+            
+            # 리스트 페이지 크롤링
+            branduid_list = await crawler.crawl_branduid_list(list_url)
+            
+            print(f"🔍 총 {len(branduid_list)}개 branduid 추출 완료")
+            
+            # 저장
+            storage.save(branduid_list)
+ 
+    except Exception as e:
+        print(f"💥 크롤러 실행 중 오류 발생: {str(e)}")
+        logger.error(f"크롤러 테스트 실패: {str(e)}", exc_info=True)
 
 async def test_single_product(branduid: str, output_dir: str = "playground/results"):
     """
@@ -126,45 +161,74 @@ def analyze_results(results_dir: str = "playground/results"):
 
 
 def main():
+    # """메인 함수."""
+    # parser = argparse.ArgumentParser(description="크롤러 기본 기능 테스트")
+    # parser.add_argument(
+    #     "--branduid",
+    #     type=str,
+    #     help="테스트할 제품의 branduid"
+    # )
+    # parser.add_argument(
+    #     "--init-test",
+    #     action="store_true",
+    #     help="크롤러 초기화 테스트만 실행"
+    # )
+    # parser.add_argument(
+    #     "--analyze",
+    #     action="store_true",
+    #     help="저장된 결과 분석"
+    # )
+    # parser.add_argument(
+    #     "--output-dir",
+    #     default="playground/results",
+    #     help="결과 저장 디렉토리"
+    # )
+    
+    # args = parser.parse_args()
+    
+    # print("🚀 크롤러 테스트 플레이그라운드")
+    # print("=" * 40)
+    
+    # if args.init_test:
+    #     success = test_crawler_initialization()
+    #     sys.exit(0 if success else 1)
+    
+    # if args.analyze:
+    #     analyze_results(args.output_dir)
+    #     return
+    
+    # if not args.branduid:
+    #     print("❌ --branduid 인자가 필요합니다.")
+    #     print("💡 예시: python playground/test_crawler.py --branduid=1234567")
+    #     sys.exit(1)
+    
+    # # 크롤러 초기화 테스트
+    # if not test_crawler_initialization():
+    #     sys.exit(1)
+    
+    # # 제품 크롤링 테스트
+    # asyncio.run(test_single_product(args.branduid, args.output_dir))
+
     """메인 함수."""
-    parser = argparse.ArgumentParser(description="크롤러 기본 기능 테스트")
+    parser = argparse.ArgumentParser(description="크롤러 리스트 추출 기능 테스트")
     parser.add_argument(
-        "--branduid",
+        "--list-url",
         type=str,
-        help="테스트할 제품의 branduid"
-    )
-    parser.add_argument(
-        "--init-test",
-        action="store_true",
-        help="크롤러 초기화 테스트만 실행"
-    )
-    parser.add_argument(
-        "--analyze",
-        action="store_true",
-        help="저장된 결과 분석"
+        help="테스트할 리스트 페이지 URL"
     )
     parser.add_argument(
         "--output-dir",
         default="playground/results",
         help="결과 저장 디렉토리"
     )
-    
     args = parser.parse_args()
-    
+
     print("🚀 크롤러 테스트 플레이그라운드")
     print("=" * 40)
-    
-    if args.init_test:
-        success = test_crawler_initialization()
-        sys.exit(0 if success else 1)
-    
-    if args.analyze:
-        analyze_results(args.output_dir)
-        return
-    
-    if not args.branduid:
-        print("❌ --branduid 인자가 필요합니다.")
-        print("💡 예시: python playground/test_crawler.py --branduid=1234567")
+
+    if not args.list_url:
+        print("❌ --list-url 인자가 필요합니다.")
+        print("💡 예시: python playground/test_crawler.py --list-url=http://www.asmama.com/shop/bestseller.html?xcode=REVIEW")
         sys.exit(1)
     
     # 크롤러 초기화 테스트
@@ -172,7 +236,7 @@ def main():
         sys.exit(1)
     
     # 제품 크롤링 테스트
-    asyncio.run(test_single_product(args.branduid, args.output_dir))
+    asyncio.run(test_crawl_from_list(args.list_url, args.output_dir))
 
 
 if __name__ == "__main__":

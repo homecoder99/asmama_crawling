@@ -76,7 +76,7 @@ class AsmamaCrawler(BaseCrawler):
     async def crawl_from_list(
         self, 
         list_url: str, 
-        max_items: int = 30
+        max_items: int = 100
     ) -> List[Dict[str, Any]]:
         """
         리스트 페이지에서 여러 제품을 크롤링한다.
@@ -110,9 +110,40 @@ class AsmamaCrawler(BaseCrawler):
             
             self.logger.info(f"리스트 크롤링 완료: {len(products)}/{len(branduid_list)}")
             return products
-            
+        
         except Exception as e:
             self.logger.error(f"리스트 크롤링 실패: {str(e)}", exc_info=True)
+            return []
+        
+    async def crawl_branduid_list(
+        self, 
+        list_url: str, 
+        max_items: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        branduid 목록을 크롤링한다.
+        
+        Args:
+            list_url: branduid 목록 페이지 URL
+            max_items: 최대 크롤링 아이템 수
+            
+        Returns:
+            크롤링된 branduid 목록
+        """
+        try:
+            # 리스트 페이지에서 branduid 목록 추출
+            branduid_list = await self._extract_branduid_list(list_url, max_items)
+            
+            if not branduid_list:
+                self.logger.warning("리스트 페이지에서 branduid 목록을 찾을 수 없음")
+                return []
+            
+            self.logger.info(f"리스트에서 {len(branduid_list)}개 branduid 발견")
+            
+            return branduid_list
+        
+        except Exception as e:
+            self.logger.error(f"branduid 목록 크롤링 실패: {str(e)}", exc_info=True)
             return []
     
     async def _extract_branduid_list(self, list_url: str, max_items: int) -> List[str]:
@@ -133,9 +164,9 @@ class AsmamaCrawler(BaseCrawler):
             if not await self.safe_goto(page, list_url):
                 return []
             
-            # TODO: 실제 사이트 구조에 맞게 셀렉터 수정 필요
-            # FIX ME: 실제 Asmama 리스트 페이지 구조 분석 후 셀렉터 업데이트
-            product_links = await page.query_selector_all('a[href*="branduid="]')
+            # Asmama 베스트셀러 페이지 구조에 맞는 셀렉터 사용
+            # df-prl-items 내의 제품 링크에서 branduid 추출
+            product_links = await page.query_selector_all('.df-prl-items .df-prl-item a[href*="shopdetail.html"][href*="branduid="]')
             
             branduid_list = []
             for link in product_links[:max_items]:
@@ -143,10 +174,12 @@ class AsmamaCrawler(BaseCrawler):
                 if href and 'branduid=' in href:
                     # branduid 파라미터 추출
                     branduid = href.split('branduid=')[1].split('&')[0]
-                    if branduid not in branduid_list:
+                    if branduid and branduid not in branduid_list:
                         branduid_list.append(branduid)
+                        self.logger.debug(f"branduid 추출: {branduid}")
             
             await context.close()
+            self.logger.info(f"총 {len(branduid_list)}개 branduid 추출 완료")
             return branduid_list
             
         except Exception as e:
