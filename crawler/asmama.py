@@ -315,7 +315,7 @@ class AsmamaCrawler(BaseCrawler):
                 "size": "",
                 "weight": "",
                 "summary_description": "",
-                "unique_item_id": branduid,  # branduid를 unique_item_id로 사용
+                "unique_item_id": "asmama_" + branduid,  # branduid를 unique_item_id로 사용
                 "category_name": "",
                 "brand_name": "asmama",  # 기본 브랜드명
                 "item_name": "",
@@ -479,7 +479,7 @@ class AsmamaCrawler(BaseCrawler):
                                 # 가격 정보 추출
                                 price_attr = await option.get_attribute('org_opt_price')
                                 stock_attr = "200"
-                                sto_id = product_data["brand_name"] + "_" + product_data["unique_item_id"] + "_" + await option.get_attribute('sto_id') or "0"
+                                sto_id = product_data["unique_item_id"] + "_" + await option.get_attribute('sto_id') or "0"
                                 
                                 # 형식: 옵션명||*옵션값||*옵션가격||*재고수량||*판매자옵션코드$$
                                 option_string = f"{option_name}||*{option_text}||*{price_attr}||*{stock_attr}||*{sto_id}"
@@ -512,8 +512,8 @@ class AsmamaCrawler(BaseCrawler):
                 # 카테고리 키워드 매핑
                 category_mapping = {
                     "팔찌": ["팔찌"],
-                    "귀찌": ["귀찌", "이어커프", "피어싱"],
-                    "귀걸이": ["귀걸이", "이어링"],
+                    "귀찌": ["귀찌", "피어싱", "피어스"],
+                    "귀걸이": ["귀걸이", "이어링", "입찌", "이어커프"],
                     "반지": ["반지", "링"],
                     "목걸이": ["목걸이", "체인", "펜던트"],
                     "헤어핀": ["헤어핀", "집게핀", "헤어후크", "헤어비녀"],

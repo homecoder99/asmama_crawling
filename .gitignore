@@ -24,6 +24,11 @@ node_modules/
 # OS specific
 .DS_Store
 
+# Excel temporary files
+~$*.xlsx
+~$*.xls
+.~lock.*
+
 # dev
 __pycache__
 target.html
