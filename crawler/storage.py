@@ -76,7 +76,10 @@ class ExcelStorage(BaseStorage):
             file_path: Excel 파일 경로
         """
         self.file_path = Path(file_path)
-        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # 로거 설정 - setup_logger와 동일한 핸들러 사용
+        from .utils import setup_logger
+        self.logger = setup_logger(self.__class__.__name__)
         
         # 라이브러리 의존성 확인
         if not PANDAS_AVAILABLE:
@@ -123,7 +126,7 @@ class ExcelStorage(BaseStorage):
             if isinstance(data, dict):
                 data = [data]
             
-            # 기존 데이터에 추가
+            # 기존 데이터에 추가 (배치 저장 시 중복 방지)
             self.data.extend(data)
             
             # DataFrame으로 변환
@@ -251,7 +254,10 @@ class JSONStorage(BaseStorage):
             file_path: JSON 파일 경로
         """
         self.file_path = Path(file_path)
-        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # 로거 설정 - setup_logger와 동일한 핸들러 사용
+        from .utils import setup_logger
+        self.logger = setup_logger(self.__class__.__name__)
         
         # 디렉토리 생성
         self.file_path.parent.mkdir(parents=True, exist_ok=True)

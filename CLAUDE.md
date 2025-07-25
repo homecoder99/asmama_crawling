@@ -218,3 +218,7 @@ def new_function(param: str) -> bool:
 
 This project uses Task Master AI for progress tracking. Current completion: 75% (9/12 tasks).
 Use `make test` to verify acceptance criteria: 30+ items crawled, comprehensive logging, all tests passing.
+
+## Task Master AI Instructions
+**Import Task Master's development workflow commands and guidelines, treat as if import is in the main CLAUDE.md file.**
+@./.taskmaster/CLAUDE.md

@@ -1,15 +1,21 @@
-.PHONY: help install crawl test test-unit test-integration clean setup
+.PHONY: help install crawl test test-unit test-integration clean setup analyze validate playground
 
 # Default goal
 .DEFAULT_GOAL := help
 
 # Variables
-PYTHON := python3
-PIP := pip
-PYTEST := pytest
+PYTHON := source .venv/bin/activate && python
+PIP := source .venv/bin/activate && uv pip
+PYTEST := source .venv/bin/activate && pytest
+BLACK := source .venv/bin/activate && black
+FLAKE8 := source .venv/bin/activate && flake8
+MYPY := source .venv/bin/activate && mypy
 DATA_DIR := data
 LOGS_DIR := logs
 TEST_DIR := tests
+UPLOADER_DIR := uploader
+TEMPLATES_DIR := $(UPLOADER_DIR)/templates
+OUTPUT_DIR := $(UPLOADER_DIR)/output
 
 help: ## 사용 가능한 명령어를 표시합니다
 	@echo "Asmama 크롤러 - 사용 가능한 명령어:"
@@ -17,13 +23,19 @@ help: ## 사용 가능한 명령어를 표시합니다
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "예시:"
-	@echo "  make install          # 의존성 설치"
-	@echo "  make crawl            # 기본 크롤링 실행"
-	@echo "  make test             # 전체 테스트 실행"
-	@echo "  make clean            # 로그 및 임시 파일 정리"
+	@echo "  make install                    # 의존성 설치"
+	@echo "  make crawl                      # 기본 크롤링 실행"
+	@echo "  make validate                   # 데이터 검증 및 정리"
+	@echo "  make analyze                    # 데이터 분석 보고서 생성"
+	@echo "  make upload                     # 크롤링 데이터를 Qoo10 형식으로 변환"
+	@echo "  make workflow                   # 전체 워크플로우 실행"
+	@echo "  make playground-test LIST_URL=\"URL\"  # 리스트 페이지 테스트"
+	@echo "  make test                       # 전체 테스트 실행"
+	@echo "  make clean                      # 로그 및 임시 파일 정리"
 
 install: ## 의존성을 설치합니다
 	@echo "의존성 설치 중..."
+	uv venv .venv
 	$(PIP) install -r requirements.txt
 	$(PYTHON) -m playwright install chromium
 	@echo "의존성 설치 완료!"
@@ -31,6 +43,14 @@ install: ## 의존성을 설치합니다
 setup: install ## 프로젝트 초기 설정을 수행합니다
 	@echo "프로젝트 초기 설정 중..."
 	mkdir -p $(DATA_DIR) $(LOGS_DIR) $(TEST_DIR)
+	mkdir -p playground/results
+	mkdir -p $(TEMPLATES_DIR) $(OUTPUT_DIR)
+	@echo "디렉토리 구조 생성 완료:"
+	@echo "  📁 $(DATA_DIR)/ - 크롤링 데이터 저장"
+	@echo "  📁 $(LOGS_DIR)/ - 로그 파일 저장"
+	@echo "  📁 playground/results/ - 분석 결과 저장"
+	@echo "  📁 $(TEMPLATES_DIR)/ - 업로드 템플릿 파일 저장"
+	@echo "  📁 $(OUTPUT_DIR)/ - Qoo10 업로드 파일 저장"
 	@echo "설정 완료!"
 
 crawl: ## 기본 크롤링을 실행합니다 (branduid=1234567)
@@ -67,13 +87,13 @@ test-crawler: ## 크롤러 테스트만 실행합니다
 
 lint: ## 코드 품질 검사를 실행합니다
 	@echo "코드 품질 검사 중..."
-	flake8 crawler/ main.py --max-line-length=100
-	black --check crawler/ main.py
-	mypy crawler/ main.py
+	$(FLAKE8) crawler/ main.py --max-line-length=100
+	$(BLACK) --check crawler/ main.py
+	$(MYPY) crawler/ main.py
 
 format: ## 코드 포맷팅을 적용합니다
 	@echo "코드 포맷팅 적용 중..."
-	black crawler/ main.py
+	$(BLACK) crawler/ main.py
 
 clean: ## 로그 및 임시 파일을 정리합니다
 	@echo "파일 정리 중..."
@@ -93,6 +113,27 @@ clean-data: ## 크롤링 데이터 파일을 삭제합니다
 	rm -rf $(DATA_DIR)/*.json
 	@echo "데이터 파일 삭제 완료!"
 
+clean-logs: ## 검증 로그 파일을 삭제합니다
+	@echo "검증 로그 파일 삭제 중..."
+	rm -rf $(LOGS_DIR)/validation_*.json
+	rm -rf $(LOGS_DIR)/validation_*.txt
+	@echo "검증 로그 파일 삭제 완료!"
+
+clean-results: ## playground 결과 파일을 삭제합니다
+	@echo "playground 결과 파일 삭제 중..."
+	rm -rf playground/results/*.txt
+	rm -rf playground/results/*.json
+	@echo "playground 결과 파일 삭제 완료!"
+
+clean-upload: ## 업로드 출력 파일을 삭제합니다
+	@echo "업로드 출력 파일 삭제 중..."
+	rm -rf $(OUTPUT_DIR)/*.xlsx
+	rm -rf $(OUTPUT_DIR)/*.txt
+	rm -rf $(UPLOADER_DIR)/logs/*.log
+	@echo "업로드 출력 파일 삭제 완료!"
+
+clean-all: clean clean-data clean-logs clean-results clean-upload ## 모든 임시 파일을 삭제합니다
+
 logs: ## 최근 로그 파일을 표시합니다
 	@echo "최근 로그 파일들:"
 	@ls -la $(LOGS_DIR)/*.log 2>/dev/null || echo "로그 파일이 없습니다."
@@ -105,6 +146,128 @@ stats: ## 크롤링 통계를 표시합니다
 		echo "크롤링 데이터가 없습니다."; \
 	fi
 
+# 데이터 분석 및 검증 관련 명령어
+analyze: ## 크롤링 데이터를 분석합니다
+	@echo "크롤링 데이터 분석 중..."
+	@if [ -f "$(DATA_DIR)/asmama_products.xlsx" ]; then \
+		$(PYTHON) playground/analyze_data.py --input=$(DATA_DIR)/asmama_products.xlsx --output=playground/results/analysis_report.txt; \
+	else \
+		echo "❌ 분석할 데이터가 없습니다. 먼저 크롤링을 실행하세요."; \
+	fi
+
+validate: ## 크롤링 데이터를 검증하고 정리합니다
+	@echo "크롤링 데이터 검증 중..."
+	@if [ -f "$(DATA_DIR)/asmama_products.xlsx" ]; then \
+		$(PYTHON) playground/analyze_data.py --input=$(DATA_DIR)/asmama_products.xlsx --validate --validated-output=$(DATA_DIR)/validated_products.xlsx; \
+	else \
+		echo "❌ 검증할 데이터가 없습니다. 먼저 크롤링을 실행하세요."; \
+	fi
+
+validate-celeb: ## 셀럽 정보 필수로 데이터를 검증합니다
+	@echo "크롤링 데이터 검증 중 (셀럽 정보 필수)..."
+	@if [ -f "$(DATA_DIR)/asmama_products.xlsx" ]; then \
+		$(PYTHON) playground/analyze_data.py --input=$(DATA_DIR)/asmama_products.xlsx --validate --require-celeb-info --validated-output=$(DATA_DIR)/validated_products_celeb.xlsx; \
+	else \
+		echo "❌ 검증할 데이터가 없습니다. 먼저 크롤링을 실행하세요."; \
+	fi
+
+analyze-detailed: ## 상세 데이터 분석을 수행합니다
+	@echo "상세 데이터 분석 중..."
+	@if [ -f "$(DATA_DIR)/asmama_products.xlsx" ]; then \
+		$(PYTHON) playground/analyze_data.py --input=$(DATA_DIR)/asmama_products.xlsx --detailed --output=playground/results/detailed_analysis.txt; \
+	else \
+		echo "❌ 분석할 데이터가 없습니다. 먼저 크롤링을 실행하세요."; \
+	fi
+
+# Qoo10 업로드 변환 관련 명령어
+upload: ## 크롤링 데이터를 Qoo10 업로드 형식으로 변환합니다
+	@echo "🚀 Qoo10 업로드 데이터 변환 시작..."
+	@if [ -f "$(DATA_DIR)/asmama_products.xlsx" ]; then \
+		$(PYTHON) $(UPLOADER_DIR)/uploader.py --input $(DATA_DIR)/asmama_products.xlsx --templates $(TEMPLATES_DIR) --output $(OUTPUT_DIR); \
+	else \
+		echo "❌ 변환할 데이터가 없습니다. 먼저 크롤링을 실행하세요."; \
+	fi
+
+upload-validated: ## 검증된 데이터를 Qoo10 업로드 형식으로 변환합니다
+	@echo "🚀 검증된 데이터 Qoo10 업로드 변환 시작..."
+	@if [ -f "$(DATA_DIR)/validated_products.xlsx" ]; then \
+		$(PYTHON) $(UPLOADER_DIR)/uploader.py --input $(DATA_DIR)/validated_products.xlsx --templates $(TEMPLATES_DIR) --output $(OUTPUT_DIR); \
+	else \
+		echo "❌ 검증된 데이터가 없습니다. 먼저 validate를 실행하세요."; \
+	fi
+
+upload-celeb: ## 셀럽 검증된 데이터를 Qoo10 업로드 형식으로 변환합니다
+	@echo "🚀 셀럽 검증된 데이터 Qoo10 업로드 변환 시작..."
+	@if [ -f "$(DATA_DIR)/validated_products_celeb.xlsx" ]; then \
+		$(PYTHON) $(UPLOADER_DIR)/uploader.py --input $(DATA_DIR)/validated_products_celeb.xlsx --templates $(TEMPLATES_DIR) --output $(OUTPUT_DIR); \
+	else \
+		echo "❌ 셀럽 검증된 데이터가 없습니다. 먼저 validate-celeb을 실행하세요."; \
+	fi
+
+upload-custom: ## 사용자 정의 파일을 Qoo10 업로드 형식으로 변환합니다
+	@if [ -z "$(INPUT_FILE)" ]; then \
+		echo "사용법: make upload-custom INPUT_FILE=path/to/file.xlsx"; \
+		exit 1; \
+	fi
+	@echo "🚀 사용자 정의 파일 Qoo10 업로드 변환 시작: $(INPUT_FILE)"
+	@if [ -f "$(INPUT_FILE)" ]; then \
+		$(PYTHON) $(UPLOADER_DIR)/uploader.py --input $(INPUT_FILE) --templates $(TEMPLATES_DIR) --output $(OUTPUT_DIR); \
+	else \
+		echo "❌ 입력 파일이 존재하지 않습니다: $(INPUT_FILE)"; \
+	fi
+
+upload-debug: ## 디버그 모드로 업로드 변환을 실행합니다
+	@echo "🐛 디버그 모드 Qoo10 업로드 변환 시작..."
+	@if [ -f "$(DATA_DIR)/asmama_products.xlsx" ]; then \
+		$(PYTHON) $(UPLOADER_DIR)/uploader.py --input $(DATA_DIR)/asmama_products.xlsx --templates $(TEMPLATES_DIR) --output $(OUTPUT_DIR) --log-level DEBUG; \
+	else \
+		echo "❌ 변환할 데이터가 없습니다. 먼저 크롤링을 실행하세요."; \
+	fi
+
+upload-test: ## 테스트용 소량 데이터로 업로드 변환을 실행합니다 (3개 상품)
+	@echo "🧪 테스트 모드 Qoo10 업로드 변환 시작 (3개 상품)..."
+	@if [ -f "$(DATA_DIR)/test_3_products.xlsx" ]; then \
+		$(PYTHON) $(UPLOADER_DIR)/uploader.py --input $(DATA_DIR)/test_3_products.xlsx --templates $(TEMPLATES_DIR) --output $(OUTPUT_DIR) --log-level DEBUG --image-filter advanced; \
+	else \
+		echo "❌ 테스트 데이터가 없습니다. 먼저 테스트 데이터를 생성하세요."; \
+		echo "실행: make create-test-data"; \
+	fi
+
+create-test-data: ## 테스트용 소량 데이터를 생성합니다 (3개 상품)
+	@echo "🧪 테스트 데이터 생성 중..."
+	@if [ -f "$(DATA_DIR)/validated_products_celeb.xlsx" ]; then \
+		$(PYTHON) -c "import pandas as pd; df = pd.read_excel('$(DATA_DIR)/validated_products_celeb.xlsx'); test_df = df.head(3); test_df.to_excel('$(DATA_DIR)/test_3_products.xlsx', index=False); print(f'테스트 데이터 생성: {len(test_df)}개 상품')"; \
+	else \
+		echo "❌ 원본 데이터가 없습니다. 먼저 validate-celeb을 실행하세요."; \
+	fi
+
+setup-templates: ## 업로드 템플릿 디렉토리를 설정합니다
+	@echo "📁 업로드 템플릿 디렉토리 설정 중..."
+	mkdir -p $(TEMPLATES_DIR)
+	@echo "템플릿 파일들을 $(TEMPLATES_DIR)/ 디렉토리에 배치하세요:"
+	@echo "  - ban_brands.xlsx: 금지 브랜드 목록"
+	@echo "  - warning_keywords.xlsx: 경고 키워드 목록"
+	@echo "  - registered_products.xlsx: 기등록 상품 목록"
+	@echo "  - sample_format.xlsx: Qoo10 업로드 샘플 형식"
+	@echo "템플릿 디렉토리 설정 완료!"
+
+# Playground 스크립트 명령어
+playground-unit-test: ## 크롤러 단일 제품 테스트를 실행합니다
+	@echo "크롤러 단일 제품 테스트 실행 중..."
+	@if [ -z "$(BRANDUID)" ]; then \
+		echo "사용법: make playground-unit-test BRANDUID=1234567"; \
+		exit 1; \
+	fi
+	$(PYTHON) playground/test_crawler.py --branduid=$(BRANDUID)
+
+playground-test: ## 크롤러 리스트 테스트를 실행합니다
+	@echo "크롤러 리스트 테스트 실행 중..."
+	@if [ -z "$(LIST_URL)" ]; then \
+		echo "사용법: make playground-test LIST_URL=\"http://www.asmama.com/shop/bestseller.html?xcode=REVIEW\""; \
+		exit 1; \
+	fi
+	$(PYTHON) playground/test_crawler.py --list-url="$(LIST_URL)"
+
 dev: ## 개발 환경을 준비합니다 (설치 + 테스트)
 	@echo "개발 환경 준비 중..."
 	$(MAKE) install
@@ -116,6 +279,61 @@ demo: ## 데모 크롤링을 실행합니다 (테스트용 branduid 사용)
 	@echo "주의: 실제 사이트 구조에 맞게 셀렉터 수정이 필요할 수 있습니다."
 	$(PYTHON) main.py --branduid=test123 --output=$(DATA_DIR)/demo_products.xlsx
 
+# 워크플로우 명령어
+workflow: ## 전체 워크플로우를 실행합니다 (크롤링 → 검증 → 분석 → 업로드)
+	@echo "🚀 전체 워크플로우 시작..."
+	@echo "1️⃣ 크롤링 실행 중..."
+	$(MAKE) crawl-list
+	@echo "2️⃣ 데이터 검증 중..."
+	$(MAKE) validate
+	@echo "3️⃣ 데이터 분석 중..."
+	$(MAKE) analyze
+	@echo "4️⃣ Qoo10 업로드 변환 중..."
+	$(MAKE) upload-validated
+	@echo "✅ 전체 워크플로우 완료!"
+	@echo ""
+	@echo "결과 파일:"
+	@echo "  📊 원본 데이터: $(DATA_DIR)/asmama_products.xlsx"
+	@echo "  ✅ 검증된 데이터: $(DATA_DIR)/validated_products.xlsx"
+	@echo "  📋 분석 보고서: playground/results/analysis_report.txt"
+	@echo "  📝 검증 로그: logs/validation_stats.json"
+	@echo "  🚀 Qoo10 업로드 파일: $(OUTPUT_DIR)/qoo10_upload_*.xlsx"
+
+workflow-upload-only: ## 업로드 전용 워크플로우를 실행합니다 (크롤링 → 업로드)
+	@echo "🚀 업로드 전용 워크플로우 시작..."
+	@echo "1️⃣ 크롤링 실행 중..."
+	$(MAKE) crawl-list
+	@echo "2️⃣ Qoo10 업로드 변환 중..."
+	$(MAKE) upload
+	@echo "✅ 업로드 전용 워크플로우 완료!"
+	@echo ""
+	@echo "결과 파일:"
+	@echo "  📊 원본 데이터: $(DATA_DIR)/asmama_products.xlsx"
+	@echo "  🚀 Qoo10 업로드 파일: $(OUTPUT_DIR)/qoo10_upload_*.xlsx"
+
+workflow-custom: ## 사용자 정의 branduid로 워크플로우를 실행합니다
+	@if [ -z "$(BRANDUID)" ]; then \
+		echo "사용법: make workflow-custom BRANDUID=1234567"; \
+		exit 1; \
+	fi
+	@echo "🚀 사용자 정의 워크플로우 시작: branduid=$(BRANDUID)"
+	@echo "1️⃣ 크롤링 실행 중..."
+	$(MAKE) crawl-custom BRANDUID=$(BRANDUID)
+	@echo "2️⃣ 데이터 검증 중..."
+	$(MAKE) validate
+	@echo "3️⃣ 데이터 분석 중..."
+	$(MAKE) analyze
+	@echo "4️⃣ Qoo10 업로드 변환 중..."
+	$(MAKE) upload-validated
+	@echo "✅ 전체 워크플로우 완료!"
+
+quick-test: ## 빠른 테스트 워크플로우 (단일 branduid → 검증 → 분석)
+	@echo "⚡ 빠른 테스트 워크플로우 시작..."
+	$(MAKE) crawl BRANDUID=1234567
+	$(MAKE) validate
+	$(MAKE) analyze
+	@echo "✅ 빠른 테스트 완료!"
+
 # CI/CD 관련 명령어
 ci: install lint test ## CI 파이프라인을 실행합니다
 
@@ -123,10 +341,10 @@ ci: install lint test ## CI 파이프라인을 실행합니다
 install-help: ## 설치 관련 도움말을 표시합니다
 	@echo "설치 관련 도움말:"
 	@echo ""
-	@echo "1. Python 3.8+ 필요"
+	@echo "1. uv, Python 3.8+ 필요"
 	@echo "2. make install 실행"
 	@echo "3. make demo 로 테스트"
 	@echo ""
 	@echo "문제 해결:"
-	@echo "- Playwright 설치 실패 시: python -m playwright install chromium"
-	@echo "- 권한 문제 시: pip install --user -r requirements.txt"
+	@echo "- Playwright 설치 실패 시: source .venv/bin/activate && python -m playwright install chromium"
+	@echo "- 권한 문제 시: source .venv/bin/activate && uv pip install --user -r requirements.txt"

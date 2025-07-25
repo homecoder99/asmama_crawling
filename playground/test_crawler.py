@@ -11,16 +11,88 @@ import sys
 import argparse
 import asyncio
 from pathlib import Path
+from urllib.parse import urlparse
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from crawler.asmama import AsmamaCrawler
-from crawler.storage import JSONStorage
+from crawler.storage import JSONStorage, ExcelStorage
 from crawler.utils import setup_logger
 
 logger = setup_logger(__name__)
 
+async def test_crawl_from_list(list_url: str, output_dir: str = "playground/results"):
+    """
+    리스트 페이지 크롤링 테스트.
+    """
+    print(f"🔍 리스트 페이지 크롤링 테스트 시작: {list_url}")
+    
+    # 결과 디렉토리 생성
+    results_dir = Path(output_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Excel 저장소 설정
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    storage_path = results_dir / f"asmama_crawl_{timestamp}.xlsx"
+    storage = ExcelStorage(str(storage_path))
+
+    # 크롤러 초기화 (Excel 저장소 포함)
+    crawler = AsmamaCrawler(storage=storage, max_workers=1)
+    
+    try:
+        async with crawler:
+            print("📡 브라우저 초기화 완료")
+            print(f"📁 Excel 파일 저장 경로: {storage_path}")
+            
+            # branduid 목록 크롤링
+            branduid_list = await crawler.crawl_branduid_list(list_url)
+
+            # branduid 목록에서 제품 크롤링 (배치별 자동 저장)
+            product_data = await crawler.crawl_from_branduid_list(branduid_list)
+            
+            print(f"🔍 총 {len(product_data)}개 제품 크롤링 완료")
+            print(f"💾 최종 데이터가 {storage_path}에 저장되었습니다")
+
+    except Exception as e:
+        print(f"💥 크롤러 실행 중 오류 발생: {str(e)}")
+        logger.error(f"크롤러 테스트 실패: {str(e)}", exc_info=True)
+
+async def test_crawl_branduid_list(list_url: str, output_dir: str = "playground/results"):
+    """
+    리스트 페이지 크롤링 테스트.
+    """
+    print(f"🔍 리스트 페이지 크롤링 테스트 시작: {list_url}")
+    
+    # 결과 디렉토리 생성
+    results_dir = Path(output_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    
+    url_name = "_".join(urlparse(list_url).path.split("/")) + "_" + urlparse(list_url).query
+
+    # 저장소 설정
+    storage_path = results_dir / f"test_list{url_name}.json"
+    storage = JSONStorage(str(storage_path))
+
+    # 크롤러 초기화
+    crawler = AsmamaCrawler(storage=storage, max_workers=1)
+    
+    try:
+        async with crawler:
+            print("📡 브라우저 초기화 완료")
+            
+            # 리스트 페이지 크롤링
+            branduid_list = await crawler.crawl_branduid_list(list_url)
+            
+            print(f"🔍 총 {len(branduid_list)}개 branduid 추출 완료")
+            
+            # 저장
+            storage.save(branduid_list)
+ 
+    except Exception as e:
+        print(f"💥 크롤러 실행 중 오류 발생: {str(e)}")
+        logger.error(f"크롤러 테스트 실패: {str(e)}", exc_info=True)
 
 async def test_single_product(branduid: str, output_dir: str = "playground/results"):
     """
@@ -52,23 +124,12 @@ async def test_single_product(branduid: str, output_dir: str = "playground/resul
             
             if result:
                 print("✅ 크롤링 성공!")
-                print(f"📄 제품명: {result.get('name', 'N/A')}")
+                print(f"📄 제품명: {result.get('item_name', 'N/A')}")
                 print(f"💰 가격: {result.get('price', 'N/A')}")
-                print(f"🎨 옵션 수: {len(result.get('options', []))}")
-                print(f"🖼️  이미지 수: {len(result.get('image_urls', []))}")
+                print(f"🎨 옵션 수: {len(result.get('option_info', []))}")
+                print(f"🖼️  이미지 수: {len(result.get('images', []))}")
                 print(f"💾 저장 위치: {storage_path}")
-                
-                # 상세 정보 출력
-                if result.get('options'):
-                    print(f"🔧 옵션: {', '.join(result['options'])}")
-                
-                if result.get('image_urls'):
-                    print("🖼️  이미지 URL 샘플:")
-                    for i, url in enumerate(result['image_urls'][:3]):
-                        print(f"   {i+1}. {url}")
-                    if len(result['image_urls']) > 3:
-                        print(f"   ... 외 {len(result['image_urls']) - 3}개")
-                
+
             else:
                 print("❌ 크롤링 실패")
                 print("🔍 로그 파일을 확인하여 상세 오류를 확인하세요")
@@ -91,7 +152,7 @@ def test_crawler_initialization():
         
         # 커스텀 설정
         storage = JSONStorage("playground/results/test_init.json")
-        crawler_custom = AsmamaCrawler(storage=storage, max_workers=2)
+        crawler_custom = AsmamaCrawler(storage=storage, max_workers=1)
         print(f"✅ 커스텀 초기화 성공 (max_workers: {crawler_custom.max_workers})")
         
         return True
@@ -137,45 +198,74 @@ def analyze_results(results_dir: str = "playground/results"):
 
 
 def main():
+    # """메인 함수."""
+    # parser = argparse.ArgumentParser(description="크롤러 기본 기능 테스트")
+    # parser.add_argument(
+    #     "--branduid",
+    #     type=str,
+    #     help="테스트할 제품의 branduid"
+    # )
+    # parser.add_argument(
+    #     "--init-test",
+    #     action="store_true",
+    #     help="크롤러 초기화 테스트만 실행"
+    # )
+    # parser.add_argument(
+    #     "--analyze",
+    #     action="store_true",
+    #     help="저장된 결과 분석"
+    # )
+    # parser.add_argument(
+    #     "--output-dir",
+    #     default="playground/results",
+    #     help="결과 저장 디렉토리"
+    # )
+    
+    # args = parser.parse_args()
+    
+    # print("🚀 크롤러 테스트 플레이그라운드")
+    # print("=" * 40)
+    
+    # if args.init_test:
+    #     success = test_crawler_initialization()
+    #     sys.exit(0 if success else 1)
+    
+    # if args.analyze:
+    #     analyze_results(args.output_dir)
+    #     return
+    
+    # if not args.branduid:
+    #     print("❌ --branduid 인자가 필요합니다.")
+    #     print("💡 예시: python playground/test_crawler.py --branduid=1234567")
+    #     sys.exit(1)
+    
+    # # 크롤러 초기화 테스트
+    # if not test_crawler_initialization():
+    #     sys.exit(1)
+    
+    # # 제품 크롤링 테스트
+    # asyncio.run(test_single_product(args.branduid, args.output_dir))
+
     """메인 함수."""
-    parser = argparse.ArgumentParser(description="크롤러 기본 기능 테스트")
+    parser = argparse.ArgumentParser(description="크롤러 리스트 추출 기능 테스트")
     parser.add_argument(
-        "--branduid",
+        "--list-url",
         type=str,
-        help="테스트할 제품의 branduid"
-    )
-    parser.add_argument(
-        "--init-test",
-        action="store_true",
-        help="크롤러 초기화 테스트만 실행"
-    )
-    parser.add_argument(
-        "--analyze",
-        action="store_true",
-        help="저장된 결과 분석"
+        help="테스트할 리스트 페이지 URL"
     )
     parser.add_argument(
         "--output-dir",
         default="playground/results",
         help="결과 저장 디렉토리"
     )
-    
     args = parser.parse_args()
-    
+
     print("🚀 크롤러 테스트 플레이그라운드")
     print("=" * 40)
-    
-    if args.init_test:
-        success = test_crawler_initialization()
-        sys.exit(0 if success else 1)
-    
-    if args.analyze:
-        analyze_results(args.output_dir)
-        return
-    
-    if not args.branduid:
-        print("❌ --branduid 인자가 필요합니다.")
-        print("💡 예시: python playground/test_crawler.py --branduid=1234567")
+
+    if not args.list_url:
+        print("❌ --list-url 인자가 필요합니다.")
+        print("💡 예시: python playground/test_crawler.py --list-url=http://www.asmama.com/shop/bestseller.html?xcode=REVIEW")
         sys.exit(1)
     
     # 크롤러 초기화 테스트
@@ -183,7 +273,7 @@ def main():
         sys.exit(1)
     
     # 제품 크롤링 테스트
-    asyncio.run(test_single_product(args.branduid, args.output_dir))
+    asyncio.run(test_crawl_from_list(args.list_url, args.output_dir))
 
 
 if __name__ == "__main__":

@@ -27,7 +27,10 @@ class BaseCrawler(ABC):
         """
         self.storage = storage
         self.max_workers = max_workers
-        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # 로거 설정 - setup_logger와 동일한 핸들러 사용
+        from .utils import setup_logger
+        self.logger = setup_logger(self.__class__.__name__)
         
         # Playwright 관련 변수
         self.playwright: Optional[Playwright] = None
@@ -50,7 +53,7 @@ class BaseCrawler(ABC):
         try:
             self.playwright = await async_playwright().start()
             self.browser = await self.playwright.chromium.launch(
-                headless=True,
+                headless=False,
                 args=['--no-sandbox', '--disable-setuid-sandbox']
             )
             self.logger.info("브라우저 초기화 완료")
@@ -80,7 +83,7 @@ class BaseCrawler(ABC):
             
     async def create_context(self) -> BrowserContext:
         """
-        새로운 브라우저 컨텍스트를 생성한다.
+        새로운 브라우저 컨텍스트를 생성하고 리소스 차단을 설정한다.
         
         Returns:
             생성된 브라우저 컨텍스트
@@ -96,8 +99,67 @@ class BaseCrawler(ABC):
             user_agent=user_agent
         )
         
+        # 서버 부담 경감을 위한 리소스 차단 설정
+        await self._setup_resource_blocking(context)
+        
         self.contexts.append(context)
         return context
+    
+    async def _setup_resource_blocking(self, context: BrowserContext) -> None:
+        """
+        서버 부담 경감을 위한 리소스 차단을 설정한다.
+        
+        Args:
+            context: 브라우저 컨텍스트
+        """
+        async def handle_route(route):
+            """리소스 요청을 처리한다."""
+            url = route.request.url
+            resource_type = route.request.resource_type
+            
+            # 이미지 파일 차단 (URL은 수집하되 실제 다운로드 방지)
+            if resource_type == "image":
+                await route.abort()
+                return
+            
+            # 폰트 파일 차단
+            if resource_type == "font" or any(ext in url.lower() for ext in ['.woff', '.woff2', '.ttf', '.otf', '.eot']):
+                await route.abort()
+                return
+            
+            # 미디어 파일 차단
+            if resource_type == "media" or any(ext in url.lower() for ext in ['.mp4', '.avi', '.mov', '.wmv', '.mp3', '.wav', '.ogg']):
+                await route.abort()
+                return
+            
+            # 광고 및 추적 스크립트 차단
+            blocked_domains = [
+                'google-analytics.com',
+                'googletagmanager.com',
+                'facebook.com/tr',
+                'doubleclick.net',
+                'googlesyndication.com',
+                'adsystem.com',
+                'ads.yahoo.com',
+                'amazon-adsystem.com'
+            ]
+            
+            if any(domain in url.lower() for domain in blocked_domains):
+                await route.abort()
+                return
+            
+            # 불필요한 CSS 파일 차단 (일부만)
+            if resource_type == "stylesheet" and any(keyword in url.lower() for keyword in ['font', 'icon', 'ads']):
+                await route.abort()
+                return
+            
+            # 그 외 요청은 정상 처리
+            await route.continue_()
+        
+        # 라우터 설정
+        await context.route("**/*", handle_route)
+        
+        self.logger.debug("리소스 차단 설정 완료 (이미지, 폰트, 미디어, 광고 스크립트)")
         
     async def create_page(self, context: Optional[BrowserContext] = None) -> Page:
         """
@@ -115,14 +177,14 @@ class BaseCrawler(ABC):
         page = await context.new_page()
         return page
         
-    async def safe_goto(self, page: Page, url: str, timeout: int = 30000) -> bool:
+    async def safe_goto(self, page: Page, url: str, timeout: int = 60000) -> bool:
         """
         안전하게 페이지로 이동한다.
         
         Args:
             page: 페이지 인스턴스
             url: 이동할 URL
-            timeout: 타임아웃 (밀리초)
+            timeout: 타임아웃 (밀리초, 기본값 60초)
             
         Returns:
             성공 여부
@@ -247,17 +309,17 @@ class BaseCrawler(ABC):
         pass
         
     @abstractmethod
-    async def crawl_from_list(
+    async def crawl_from_branduid_list(
         self, 
-        list_url: str, 
-        max_items: int = 30
+        branduid_list: List[str],
+        batch_size: int = 15
     ) -> List[Dict[str, Any]]:
         """
-        리스트 페이지에서 여러 제품을 크롤링한다.
+        branduid 목록에서 여러 제품을 크롤링한다.
         
         Args:
-            list_url: 리스트 페이지 URL
-            max_items: 최대 아이템 수
+            branduid_list: branduid 목록
+            batch_size: 배치 크기 (서버 부담 경감을 위해 기본값 15)
             
         Returns:
             크롤링된 제품 데이터 목록
