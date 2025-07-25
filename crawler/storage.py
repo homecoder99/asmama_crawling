@@ -126,7 +126,7 @@ class ExcelStorage(BaseStorage):
             if isinstance(data, dict):
                 data = [data]
             
-            # 기존 데이터에 추가
+            # 기존 데이터에 추가 (배치 저장 시 중복 방지)
             self.data.extend(data)
             
             # DataFrame으로 변환

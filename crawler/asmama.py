@@ -31,6 +31,40 @@ class AsmamaCrawler(BaseCrawler):
         super().__init__(storage, max_workers)
         self.semaphore = asyncio.Semaphore(max_workers)  # 동시성 제어
         
+        # 지속적인 컨텍스트 및 페이지 관리
+        self.persistent_context = None
+        self.list_page = None  # 상품 목록 페이지를 계속 열어둘 페이지
+    
+    async def start(self) -> None:
+        """
+        크롤러를 시작하고 지속적인 브라우저 컨텍스트를 생성한다.
+        """
+        await super().start()
+        
+        # 지속적인 컨텍스트 생성
+        self.persistent_context = await self.create_context()
+        self.logger.info("지속적인 브라우저 컨텍스트 생성 완료")
+    
+    async def stop(self) -> None:
+        """
+        크롤러를 종료하고 지속적인 컨텍스트를 정리한다.
+        """
+        try:
+            # 지속적인 페이지와 컨텍스트 정리
+            if self.list_page:
+                await self.list_page.close()
+                self.list_page = None
+                self.logger.info("상품 목록 페이지 닫기 완료")
+                
+            if self.persistent_context:
+                await self.persistent_context.close()
+                self.persistent_context = None
+                self.logger.info("지속적인 브라우저 컨텍스트 닫기 완료")
+        except Exception as e:
+            self.logger.error(f"지속적인 리소스 정리 중 오류: {str(e)}")
+        
+        await super().stop()
+        
     async def crawl_single_product(self, branduid: str) -> Optional[Dict[str, Any]]:
         """
         단일 제품을 크롤링한다.
@@ -45,18 +79,22 @@ class AsmamaCrawler(BaseCrawler):
             url = self.PRODUCT_URL_TEMPLATE.format(branduid=branduid)
             
             try:
-                context = await self.create_context()
-                page = await self.create_page(context)
+                # 지속적인 컨텍스트에서 새 페이지 생성 (컨텍스트는 닫지 않음)
+                if not self.persistent_context:
+                    self.persistent_context = await self.create_context()
+                
+                page = await self.persistent_context.new_page()
                 
                 # 페이지 로드
                 if not await self.safe_goto(page, url):
                     log_error(self.logger, branduid, "페이지 로드 실패", None)
+                    await page.close()  # 페이지만 닫기
                     return None
                 
                 # 제품 데이터 추출
                 product_data = await self._extract_product_data(page, branduid)
     
-                await context.close()
+                await page.close()  # 페이지만 닫기 (컨텍스트는 유지)
                 
                 if product_data:
                     self.logger.info(f"제품 크롤링 성공: {branduid} - {product_data['item_name']}")
@@ -90,6 +128,18 @@ class AsmamaCrawler(BaseCrawler):
                 self.logger.warning("branduid 목록에서 제품 목록을 찾을 수 없음")
                 return []
             
+            # 새로운 크롤링 세션 시작 - 기존 저장소 데이터 초기화
+            if self.storage:
+                self.storage.data = []  # 중복 방지를 위한 내부 데이터 초기화
+                self.logger.info("저장소 내부 데이터 초기화 완료")
+            
+            # branduid 중복 검사 및 제거
+            original_count = len(branduid_list)
+            branduid_list = list(dict.fromkeys(branduid_list))  # 순서 유지하며 중복 제거
+            if len(branduid_list) < original_count:
+                removed_count = original_count - len(branduid_list)
+                self.logger.info(f"중복된 branduid {removed_count}개 제거: {original_count} → {len(branduid_list)}")
+            
             self.logger.info(f"branduid 목록에서 {len(branduid_list)}개 제품 발견 (배치 크기: {batch_size})")
             
             all_products = []
@@ -115,12 +165,12 @@ class AsmamaCrawler(BaseCrawler):
                 all_products.extend(batch_products)
                 self.logger.info(f"배치 {batch_num} 완료: {len(batch_products)}/{len(batch)}개 성공")
                 
-                # 배치 완료 시마다 Excel 파일로 저장
+                # 배치 완료 시마다 Excel 파일로 저장 (원본 데이터)
                 if batch_products and self.storage:
                     try:
-                        # 배치별 저장 (누적 데이터)
-                        self.storage.save(all_products)
-                        self.logger.info(f"배치 {batch_num} 데이터 저장 완료 (총 {len(all_products)}개)")
+                        # 현재 배치만 저장 (중복 방지)
+                        self.storage.save(batch_products)
+                        self.logger.info(f"배치 {batch_num} 데이터 저장 완료 ({len(batch_products)}개 추가, 총 {len(all_products)}개)")
                     except Exception as save_error:
                         self.logger.error(f"배치 {batch_num} 저장 실패: {str(save_error)}")
                 
@@ -179,15 +229,22 @@ class AsmamaCrawler(BaseCrawler):
             branduid 목록
         """
         try:
-            context = await self.create_context()
-            page = await self.create_page(context)
+            # 지속적인 목록 페이지 생성 또는 재사용
+            if not self.list_page:
+                if not self.persistent_context:
+                    self.persistent_context = await self.create_context()
+                
+                self.list_page = await self.persistent_context.new_page()
+                self.logger.info("상품 목록 페이지 생성 (지속적으로 유지됨)")
             
-            if not await self.safe_goto(page, list_url):
+            # 목록 페이지로 이동 (이미 열려있으면 새로고침)
+            if not await self.safe_goto(self.list_page, list_url):
+                self.logger.error("목록 페이지 로드 실패")
                 return []
             
             # Asmama 베스트셀러 페이지 구조에 맞는 셀렉터 사용
             # df-prl-items 내의 제품 링크에서 branduid 추출
-            product_links = await page.query_selector_all('.df-prl-items .df-prl-item a[href*="shopdetail.html"][href*="branduid="]')
+            product_links = await self.list_page.query_selector_all('.df-prl-items .df-prl-item a[href*="shopdetail.html"][href*="branduid="]')
             
             branduid_list = []
             for link in product_links[:max_items]:
@@ -199,8 +256,8 @@ class AsmamaCrawler(BaseCrawler):
                         branduid_list.append(branduid)
                         self.logger.debug(f"branduid 추출: {branduid}")
             
-            await context.close()
-            self.logger.info(f"총 {len(branduid_list)}개 branduid 추출 완료")
+            # 목록 페이지는 닫지 않고 계속 유지
+            self.logger.info(f"총 {len(branduid_list)}개 branduid 추출 완료 (목록 페이지 유지됨)")
             return branduid_list
             
         except Exception as e:
@@ -221,7 +278,7 @@ class AsmamaCrawler(BaseCrawler):
         - category_name: 카테고리명
         - brand_name: 브랜드명
         - item_name: 제품명
-        - related_cellab: 관련 셀랩 정보
+        - related_celeb: 관련 셀랩 정보
         - origin_price: 원가
         - price: 판매가
         - option_info: 옵션 정보
@@ -262,11 +319,11 @@ class AsmamaCrawler(BaseCrawler):
                 "category_name": "",
                 "brand_name": "asmama",  # 기본 브랜드명
                 "item_name": "",
-                "related_cellab": "",
+                "related_celeb": "",
                 "origin_price": "",
                 "price": "",
-                "option_info": [],
-                "images": [],
+                "option_info": "",
+                "images": "",
                 "origin_country": "",
                 "manufacturer": "",
                 "benefit_info": "",
@@ -322,7 +379,7 @@ class AsmamaCrawler(BaseCrawler):
                         
                         # 셀럽 정보 처리
                         elif "CELEB" in th_text:
-                            product_data["related_cellab"] = td_text
+                            product_data["related_celeb"] = td_text
                             
             except Exception as e:
                 self.logger.debug(f"상품 상세 테이블 추출 실패: {str(e)}")
@@ -546,7 +603,7 @@ class AsmamaCrawler(BaseCrawler):
 
             # 이미지 URL 추출
             try:
-                image_urls = []
+                image_urls = ""
                 
                 # 1. 썸네일 이미지 추출 (imgArea)
                 thumbnail_img = page.locator('div.imgArea div.keyImg div.thumbnail span.detail-image img.detail_image').first
@@ -556,7 +613,7 @@ class AsmamaCrawler(BaseCrawler):
                         # 상대경로를 절대경로로 변환
                         if thumbnail_src.startswith('/'):
                             thumbnail_src = f"http://www.asmama.com{thumbnail_src}"
-                        image_urls.append(thumbnail_src)
+                        image_urls += thumbnail_src
                         self.logger.debug(f"썸네일 이미지 추출: {thumbnail_src}")
                 
                 # 2. 상세 이미지들 추출 (상품상세페이지 본문)
@@ -567,7 +624,7 @@ class AsmamaCrawler(BaseCrawler):
                     img = detail_imgs.nth(i)
                     img_src = await img.get_attribute('src')
                     if img_src and img_src not in image_urls:
-                        image_urls.append(img_src)
+                        image_urls += "$$" + img_src
                         self.logger.debug(f"상세 이미지 추출: {img_src}")
                 
                 product_data["images"] = image_urls

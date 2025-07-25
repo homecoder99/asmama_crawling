@@ -28,3 +28,7 @@ node_modules/
 __pycache__
 target.html
 playground/results
+
+# Task files
+# tasks.json
+# tasks/ 
