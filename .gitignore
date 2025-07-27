@@ -33,6 +33,7 @@ node_modules/
 __pycache__
 target.html
 playground/results
+uploader/output
 
 # Task files
 # tasks.json
