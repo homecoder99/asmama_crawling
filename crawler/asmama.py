@@ -471,18 +471,26 @@ class AsmamaCrawler(BaseCrawler):
                         
                         for option in options:
                             option_text = (await option.inner_text()).strip()
-                            if option_text and option_text != "옵션 선택" and (await option.get_attribute('sto_state') == "SALE"):
-                                option_value = await option.get_attribute('value')
-                                if not option_value or option_value == "":
-                                    continue
+                            option_value = await option.get_attribute('value')
+                            sto_state = await option.get_attribute('sto_state')
+                            
+                            # 빈 value 및 "옵션 선택" 제외, 품절 상품 제외
+                            if (option_text and option_text != "옵션 선택" and 
+                                option_value and option_value != "" and 
+                                sto_state == "SALE"):
                                 
-                                # 가격 정보 추출
-                                price_attr = await option.get_attribute('org_opt_price')
+                                # 옵션 텍스트에서 가격 정보 제거 (예: "(+1,000)" 제거)
+                                import re
+                                option_text_clean = re.sub(r'\([^)]*\+[^)]*\)', '', option_text).strip()
+                                
+                                # 가격 정보 추출 (price 속성 사용)
+                                price_attr = await option.get_attribute('price') or "0"
                                 stock_attr = "200"
-                                sto_id = product_data["unique_item_id"] + "_" + await option.get_attribute('sto_id') or "0"
+                                sto_id_attr = await option.get_attribute('sto_id') or "0"
+                                sto_id = product_data["unique_item_id"] + "_" + sto_id_attr
                                 
                                 # 형식: 옵션명||*옵션값||*옵션가격||*재고수량||*판매자옵션코드$$
-                                option_string = f"{option_name}||*{option_text}||*{price_attr}||*{stock_attr}||*{sto_id}"
+                                option_string = f"{option_name}||*{option_text_clean}||*{price_attr}||*{stock_attr}||*{sto_id}"
                                 option_strings.append(option_string)
                                 
                     # $$ 구분자로 연결
