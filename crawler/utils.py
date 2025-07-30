@@ -4,6 +4,7 @@ import asyncio
 import logging
 import random
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -13,12 +14,13 @@ LOGS_DIR = Path(__file__).parent.parent / "logs"
 LOGS_DIR.mkdir(exist_ok=True)
 
 
-def setup_logger(name: str) -> logging.Logger:
+def setup_logger(name: str, level: int = None) -> logging.Logger:
     """
     로거를 설정하고 반환한다.
     
     Args:
         name: 로거 이름
+        level: 로그 레벨 (None이면 환경변수 LOG_LEVEL 또는 기본값 INFO 사용)
         
     Returns:
         설정된 로거 인스턴스
@@ -28,8 +30,20 @@ def setup_logger(name: str) -> logging.Logger:
     # 이미 핸들러가 있으면 중복 설정 방지
     if logger.handlers:
         return logger
+    
+    # 로그 레벨 결정 (우선순위: 파라미터 > 환경변수 > 기본값)
+    if level is None:
+        log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
+        level_map = {
+            'DEBUG': logging.DEBUG,
+            'INFO': logging.INFO,
+            'WARNING': logging.WARNING,
+            'ERROR': logging.ERROR,
+            'CRITICAL': logging.CRITICAL
+        }
+        level = level_map.get(log_level_str, logging.INFO)
         
-    logger.setLevel(logging.INFO)
+    logger.setLevel(level)
     
     # 로그 파일 핸들러
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -37,11 +51,11 @@ def setup_logger(name: str) -> logging.Logger:
         LOGS_DIR / f"crawl_{timestamp}.log",
         encoding='utf-8'
     )
-    file_handler.setLevel(logging.INFO)
+    file_handler.setLevel(level)
     
     # 콘솔 핸들러
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(level)
     
     # 포맷터
     formatter = logging.Formatter(
