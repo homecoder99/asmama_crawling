@@ -1,15 +1,16 @@
 """Oliveyoung 웹사이트 전용 크롤러 구현."""
 
 import asyncio
-from pathlib import Path
+import os
 from typing import Any, Dict, List, Optional
 import traceback
 import re
+import logging
 
 from .cookies import OliveyoungCookieManager
 from playwright.async_api import BrowserContext
 from .base import BaseCrawler
-from .utils import log_error
+from .utils import log_error, setup_logger
 from .oliveyoung_extractors import (
     OliveyoungProductExtractor,
     OliveyoungPriceExtractor,
@@ -29,7 +30,7 @@ class OliveyoungCrawler(BaseCrawler):
     
     BASE_URL = "https://www.oliveyoung.co.kr"
     PRODUCT_URL_TEMPLATE = "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo={goodsNo}"
-    CATEGORY_URL_TEMPLATE = "https://www.oliveyoung.co.kr/store/display/getMCategoryList.do?dispCatNo={categoryId}&prdSort=02&rowsPerPage=48"
+    CATEGORY_URL_TEMPLATE = "https://www.oliveyoung.co.kr/store/display/getMCategoryList.do?dispCatNo={categoryId}"
     MAIN_PAGE_URL = "https://www.oliveyoung.co.kr/store/main/main.do"
     
     def __init__(self, storage: Any = None, max_workers: int = 1, cookie_file: str = "oy_state.json"):
@@ -42,6 +43,10 @@ class OliveyoungCrawler(BaseCrawler):
             cookie_file: 쿠키 저장 파일 경로
         """
         super().__init__(storage, max_workers)
+        # 환경변수 OY_LOG_LVL로 로그 레벨 제어 (기본: INFO)
+        log_level_str = os.getenv('OY_LOG_LVL', 'INFO').upper()
+        log_level = getattr(logging, log_level_str, logging.INFO)
+        self.logger = setup_logger(__name__, log_level)
         self.semaphore = asyncio.Semaphore(max_workers)  # 동시성 제어
         
         # 데이터 추출기 초기화
@@ -51,15 +56,12 @@ class OliveyoungCrawler(BaseCrawler):
         self.image_extractor = OliveyoungImageExtractor(self.logger)
         self.dynamic_extractor = OliveyoungDynamicContentExtractor(self.logger)
         
-        # 지속적인 컨텍스트 및 페이지 관리
-        self.persistent_context = None
-        self.list_page = None  # 상품 목록 페이지를 계속 열어둘 페이지
-
         # 쿠키 관리
         self.cookie_file = cookie_file
         self.cookie_manager = None
         self.crawl_context = None
-        self.page = None
+        self.list_page = None  # 상품 목록 페이지를 계속 열어둘 페이지
+        self.current_category_id = None  # 현재 열려있는 카테고리 ID
     
     async def __aenter__(self):
         """비동기 컨텍스트 매니저 진입."""
@@ -80,20 +82,12 @@ class OliveyoungCrawler(BaseCrawler):
         self.cookie_manager = OliveyoungCookieManager(self.cookie_file)
         await self.cookie_manager.start()
         
-        # 쿠키 파일이 없거나 유효하지 않으면 부트스트랩
-        if not Path(self.cookie_file).exists():
-            self.logger.info("쿠키 파일이 없습니다. 부트스트랩을 실행합니다.")
-            await self.cookie_manager.bootstrap_cookies()
-        
-        # 크롤링용 컨텍스트 생성 (쿠키 관리자를 통해)
-        self.crawl_context = await self.cookie_manager.get_crawl_context()
-        if not self.crawl_context:
-            raise RuntimeError("크롤링용 컨텍스트 생성 실패")
-        
-        # 기존 persistent_context도 유지 (카테고리 크롤링용)
-        self.persistent_context = await self.create_context()
-        
-        self.logger.info("Oliveyoung 향상된 크롤러 시작 완료")
+        # 자동 쿠키 만료 검증 및 컨텍스트 생성
+        try:
+            self.crawl_context = await self.cookie_manager.ensure_context()
+            self.logger.info("Oliveyoung 향상된 크롤러 시작 완료 (자동 쿠키 관리)")
+        except Exception as e:
+            raise RuntimeError(f"크롤링용 컨텍스트 생성 실패: {e}")
     
     async def stop(self) -> None:
         """
@@ -106,11 +100,6 @@ class OliveyoungCrawler(BaseCrawler):
                 self.list_page = None
                 self.logger.info("Oliveyoung 상품 목록 페이지 닫기 완료")
                 
-            if self.persistent_context:
-                await self.persistent_context.close()
-                self.persistent_context = None
-                self.logger.info("Oliveyoung 지속적인 브라우저 컨텍스트 닫기 완료")
-
             if self.crawl_context:
                 await self.crawl_context.close()
                 self.crawl_context = None
@@ -121,52 +110,15 @@ class OliveyoungCrawler(BaseCrawler):
                 self.cookie_manager = None
                 self.logger.info("Oliveyoung 쿠키 매니저 종료 완료")
 
-            if self.page:
-                await self.page.close()
-                self.page = None
-                self.logger.info("Oliveyoung 크롤링용 페이지 닫기 완료")
+            if self.list_page:
+                await self.list_page.close()
+                self.list_page = None
+                self.logger.info("Oliveyoung 상품 목록 페이지 닫기 완료")
 
         except Exception as e:
             self.logger.error(f"Oliveyoung 지속적인 리소스 정리 중 오류: {str(e)}")
         
         await super().stop()
-
-    async def get_crawl_context(self) -> Optional[BrowserContext]:
-        """
-        크롤링용 컨텍스트를 생성한다 (저장된 쿠키 로드).
-        
-        Returns:
-            크롤링용 브라우저 컨텍스트 또는 None
-        """
-        if not self.cookie_file.exists():
-            self.logger.error(f"쿠키 파일이 존재하지 않습니다: {self.cookie_file}")
-            return None
-            
-        try:
-            self.logger.info(f"저장된 쿠키 상태 로드: {self.cookie_file}")
-            
-            context = await self.browser.new_context(
-                storage_state=str(self.cookie_file),
-                user_agent=self.FIXED_USER_AGENT,
-                viewport={'width': 1920, 'height': 1080},
-                extra_http_headers={
-                    'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    'sec-ch-ua-mobile': '?0',
-                    'sec-ch-ua-platform': '"Windows"',
-                    'accept-language': 'ko-KR,ko;q=0.9,en;q=0.8',
-                    'accept-encoding': 'gzip, deflate, br'
-                }
-            )
-            
-            # 리소스 차단 설정 적용
-            await self._setup_resource_blocking(context)
-            
-            self.logger.info("크롤링용 컨텍스트 생성 완료")
-            return context
-            
-        except Exception as e:
-            self.logger.error(f"크롤링용 컨텍스트 생성 실패: {e}")
-            return None
         
     async def _refresh_session(self):
         """세션 리프레시 (쿠키 만료 시)."""
@@ -175,13 +127,82 @@ class OliveyoungCrawler(BaseCrawler):
         if self.page:
             await self.page.close()
         
-        # 새 컨텍스트 생성
-        self.crawl_context = await self.cookie_manager.refresh_cookies_if_needed(self.crawl_context)
-        if not self.crawl_context:
-            raise RuntimeError("세션 리프레시 실패")
+        # 기존 컨텍스트 정리 후 새 컨텍스트 생성
+        if self.crawl_context:
+            await self.crawl_context.close()
+            self.crawl_context = None
+        
+        try:
+            self.crawl_context = await self.cookie_manager.ensure_context()
+        except Exception as e:
+            raise RuntimeError(f"세션 리프레시 실패: {e}")
             
         self.page = await self.crawl_context.new_page()
         self.logger.info("세션 리프레시 완료")
+    
+    async def ensure_list_page(self, category_id: str) -> bool:
+        """
+        카테고리 목록 페이지를 지속적으로 유지한다.
+        
+        카테고리가 변경되거나 페이지가 없으면 새로 생성하고,
+        동일한 카테고리면 기존 페이지를 재사용한다.
+        
+        Args:
+            category_id: 카테고리 ID
+            
+        Returns:
+            페이지 준비 성공 여부
+        """
+        try:
+            # 카테고리가 변경되거나 페이지가 없으면 새로 생성
+            if (not self.list_page or 
+                self.current_category_id != category_id or
+                self.list_page.is_closed()):
+                
+                # 기존 페이지가 있으면 닫기
+                if self.list_page and not self.list_page.is_closed():
+                    await self.list_page.close()
+                    self.logger.info(f"이전 카테고리 페이지 닫기: {self.current_category_id}")
+                
+                # 컨텍스트 확인
+                if not self.crawl_context:
+                    try:
+                        self.crawl_context = await self.cookie_manager.ensure_context()
+                    except Exception as e:
+                        self.logger.error(f"크롤링 컨텍스트 생성 실패: {e}")
+                        return False
+                
+                # 새 카테고리 페이지 생성
+                self.list_page = await self.crawl_context.new_page()
+                
+                # 카테고리 URL 생성 및 이동
+                category_url = self.CATEGORY_URL_TEMPLATE.format(categoryId=category_id)
+                
+                self.logger.info(f"카테고리 페이지 이동: {category_url}")
+                
+                if not await self.safe_goto(self.list_page, category_url):
+                    await self.list_page.close()
+                    self.list_page = None
+                    return False
+                
+                # 페이지 로딩 대기
+                from .utils import random_delay
+                await random_delay(2, 3)
+                
+                self.current_category_id = category_id
+                self.logger.info(f"카테고리 목록 페이지 준비 완료: {category_id}")
+            else:
+                self.logger.debug(f"기존 카테고리 페이지 재사용: {category_id}")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"카테고리 목록 페이지 준비 실패: {e}")
+            if self.list_page and not self.list_page.is_closed():
+                await self.list_page.close()
+            self.list_page = None
+            self.current_category_id = None
+            return False
     
     async def _validate_page_content(self, page, goods_no: str) -> bool:
         """
@@ -195,6 +216,18 @@ class OliveyoungCrawler(BaseCrawler):
             True if valid product page, False if login/error page
         """
         try:
+            # 0. Cloudflare 봇 차단 페이지 감지
+            page_content = await page.content()
+            
+            # Cloudflare 에러 페이지 특징 검사
+            cloudflare_indicators = [
+                '페이지를 제대로 표시할 수 없어요',
+            ]
+            
+            if any(indicator in page_content for indicator in cloudflare_indicators):
+                self.logger.error(f"Oliveyoung Cloudflare 봇 차단 페이지 감지 ({goods_no}) - anti-bot 대응 필요")
+                return False
+            
             # 1. 상품 없음 페이지 감지
             error_element = page.locator('#error-contents.error-page.noProduct')
             if await error_element.count() > 0:
@@ -205,7 +238,7 @@ class OliveyoungCrawler(BaseCrawler):
             # 2. 로그인 페이지 감지
             login_element = page.locator('.loginArea.new-loginArea')
             if await login_element.count() > 0:
-                self.logger.warning(f"Oliveyoung 로그인 페이지로 리다이렉트됨 ({goods_no}) - 세션 만료 가능성")
+                self.logger.warning(f"Oliveyoung 로그인 페이지 감지({goods_no}) - 세션 만료 또는 성인 물품")  
                 return False
             
             # 3. 일반적인 에러 페이지 감지 (추가 안전장치)
@@ -326,16 +359,12 @@ class OliveyoungCrawler(BaseCrawler):
             url = self.PRODUCT_URL_TEMPLATE.format(goodsNo=goods_no)
             
             try:
-                
-                # 지속적인 컨텍스트에서 새 페이지 생성 (컨텍스트는 닫지 않음)
-                if not self.persistent_context:
-                    self.persistent_context = await self.create_context()
-                    
-                # 쿠키 관리자를 통해 컨텍스트 얻기
+                # 쿠키 만료 검증 후 자동 재생성
                 if not self.crawl_context:
-                    self.crawl_context = await self.cookie_manager.get_crawl_context()
-                    if not self.crawl_context:
-                        log_error(self.logger, goods_no, "Oliveyoung 크롤링 컨텍스트 생성 실패", None)
+                    try:
+                        self.crawl_context = await self.cookie_manager.ensure_context()
+                    except Exception as e:
+                        log_error(self.logger, goods_no, f"Oliveyoung 크롤링 컨텍스트 생성 실패: {e}", None)
                         return None
                 
                 page = await self.crawl_context.new_page()
@@ -435,9 +464,8 @@ class OliveyoungCrawler(BaseCrawler):
             
             # 크롤링 결과를 저장소에 저장
             if self.storage and all_products:
-                for product in all_products:
-                    self.storage.add_product(product)
-                self.logger.info(f"Oliveyoung {len(all_products)}개 제품 데이터를 저장소에 추가")
+                self.storage.save(all_products)
+                self.logger.info(f"Oliveyoung {len(all_products)}개 제품 데이터를 저장소에 저장")
             
             return all_products
             
@@ -445,32 +473,62 @@ class OliveyoungCrawler(BaseCrawler):
             self.logger.error(f"Oliveyoung 배치 크롤링 실패: {str(e)}")
             return []
     
-    async def crawl_all_categories(self, max_items_per_category: int = 15) -> List[Dict[str, Any]]:
+    async def crawl_all_categories(self, max_items_per_category: int = 15, category_filter: List[str] = None) -> List[Dict[str, Any]]:
         """
         모든 카테고리에서 제품을 크롤링한다.
         
         Args:
             max_items_per_category: 카테고리당 최대 크롤링 개수
+            category_filter: 포함할 카테고리 이름 목록 (None이면 모든 카테고리)
             
         Returns:
             크롤링된 제품 데이터 목록
         """
         try:
-            # 카테고리 목록 추출
-            categories = await self._extract_categories()
-            if not categories:
+            # 카테고리 목록 추출 (ID와 이름 포함)
+            all_categories = await self.extract_all_category_ids()
+            if not all_categories:
                 self.logger.warning("Oliveyoung 카테고리 목록을 찾을 수 없음")
                 return []
             
-            self.logger.info(f"Oliveyoung {len(categories)}개 카테고리 발견")
+            # 카테고리 필터링
+            if category_filter:
+                filtered_categories = []
+                filter_lower = [name.lower() for name in category_filter]
+                
+                for category in all_categories:
+                    # 현재 카테고리가 필터 목록에 있으면 건너뛴다
+                    if category["name"].strip().lower() in filter_lower:
+                        continue
+                    filtered_categories.append(category)
+                
+                categories = filtered_categories
+                self.logger.info(f"카테고리 필터링 적용: {len(all_categories)}개 → {len(categories)}개")
+                
+                # 필터링된 카테고리 로깅
+                for category in categories:
+                    self.logger.info(f"  - {category['id']}: {category['name']}")
+            else:
+                categories = all_categories
+            
+            if not categories:
+                self.logger.warning("필터링 후 크롤링할 카테고리가 없음")
+                return []
+            
+            self.logger.info(f"Oliveyoung {len(categories)}개 카테고리에서 크롤링 시작")
             
             all_products = []
             
-            for i, category_id in enumerate(categories, 1):
-                self.logger.info(f"Oliveyoung 카테고리 {i}/{len(categories)} 처리 중: {category_id}")
+            for i, category in enumerate(categories, 1):
+                category_id = category["id"]
+                category_name = category["name"]
+                
+                self.logger.info(f"Oliveyoung 카테고리 {i}/{len(categories)} 처리 중: {category_id} ({category_name})")
                 
                 # 카테고리별 제품 크롤링
-                category_products = await self.crawl_from_category(category_id, max_items_per_category)
+                category_products = await self.crawl_from_category(
+                    category_id, max_items_per_category
+                )
                 all_products.extend(category_products)
                 
                 # 카테고리 간 지연 (서버 부담 경감)
@@ -514,82 +572,175 @@ class OliveyoungCrawler(BaseCrawler):
             self.logger.error(f"Oliveyoung 카테고리 {category_id} 크롤링 실패: {str(e)}")
             return []
     
-    async def _extract_categories(self) -> List[str]:
-        """메인 페이지에서 카테고리 목록을 추출한다."""
+
+    async def extract_all_category_ids(self) -> List[Dict[str, str]]:
+        """
+        메인 페이지에서 모든 카테고리 ID와 이름을 추출한다.
+        
+        data-ref-dispcatno 속성과 내부 텍스트를 추출하여 전체 카테고리 트리를 가져온다.
+        
+        Returns:
+            카테고리 정보 리스트 [{"id": "category_id", "name": "category_name"}]
+        """
         try:
-            if not self.list_page:
-                if not self.persistent_context:
-                    self.persistent_context = await self.create_context()
+            # 컨텍스트 확인
+            if not self.crawl_context:
+                try:
+                    self.crawl_context = await self.cookie_manager.ensure_context()
+                except Exception as e:
+                    self.logger.error(f"크롤링 컨텍스트 생성 실패: {e}")
+                    return []
+            
+            # 메인 페이지 전용 페이지 생성 (기존 list_page와 분리)
+            main_page = await self.crawl_context.new_page()
+            
+            try:
+                self.logger.info(f"메인 페이지로 이동: {self.MAIN_PAGE_URL}")
                 
-                self.list_page = await self.persistent_context.new_page()
-                await self.safe_goto(self.list_page, self.MAIN_PAGE_URL)
-            
-            # 카테고리 링크에서 dispCatNo 추출
-            category_elements = self.list_page.locator('a[href*="dispCatNo="]')
-            category_count = await category_elements.count()
-            
-            categories = set()  # 중복 제거를 위해 set 사용
-            
-            for i in range(category_count):
-                element = category_elements.nth(i)
-                href = await element.get_attribute('href')
-                if href and 'dispCatNo=' in href:
-                    # dispCatNo 값 추출
-                    import re
-                    match = re.search(r'dispCatNo=(\d+)', href)
-                    if match:
-                        categories.add(match.group(1))
-            
-            category_list = list(categories)
-            self.logger.info(f"Oliveyoung {len(category_list)}개 카테고리 추출 완료")
-            return category_list
-            
+                if not await self.safe_goto(main_page, self.MAIN_PAGE_URL):
+                    self.logger.error("메인 페이지 로드 실패")
+                    return []
+                
+                # 페이지 로딩 대기
+                from .utils import random_delay
+                await random_delay(3, 5)
+                
+                # 메인 메뉴 내의 카테고리 링크만 선택 (더 정확한 선택자 사용)
+                # 메인 카테고리 (대분류): #gnbAllMenu .all_menu_wrap .sub_menu_box .sub_depth > a[data-ref-dispcatno]
+                # 서브 카테고리 (중/소분류): #gnbAllMenu .all_menu_wrap .sub_menu_box ul > li > a[data-ref-dispcatno]
+                main_category_selector = '#gnbAllMenu .all_menu_wrap .sub_menu_box .sub_depth > a[data-ref-dispcatno]'
+                sub_category_selector = '#gnbAllMenu .all_menu_wrap .sub_menu_box ul > li > a[data-ref-dispcatno]'
+                
+                # 메인 카테고리 요소들 추출
+                main_category_elements = main_page.locator(main_category_selector)
+                main_count = await main_category_elements.count()
+                
+                # 서브 카테고리 요소들 추출
+                sub_category_elements = main_page.locator(sub_category_selector)
+                sub_count = await sub_category_elements.count()
+                
+                total_count = main_count + sub_count
+                self.logger.info(f"카테고리 링크 발견: 메인 {main_count}개, 서브 {sub_count}개, 총 {total_count}개")
+                
+                categories = {}  # 중복 제거를 위해 dict 사용 (id: name)
+                
+                # 메인 카테고리 처리
+                for i in range(main_count):
+                    try:
+                        element = main_category_elements.nth(i)
+                        cat_id = await element.get_attribute('data-ref-dispcatno')
+                        
+                        if cat_id and cat_id.strip() and cat_id.isdigit():
+                            # 15자리 카테고리 ID만 추출
+                            if len(cat_id) == 15:
+                                cat_name = await element.inner_text()
+                                cat_name = cat_name.strip() if cat_name else ""
+                                
+                                if cat_name:  # 카테고리 이름이 있는 경우만 추가
+                                    categories[cat_id.strip()] = cat_name
+                                    self.logger.debug(f"메인 카테고리 추가: {cat_id} - {cat_name}")
+
+                    except Exception as e:
+                        self.logger.debug(f"메인 카테고리 요소 {i} 처리 중 오류: {e}")
+                        continue
+                
+                # 서브 카테고리 처리
+                for i in range(sub_count):
+                    try:
+                        element = sub_category_elements.nth(i)
+                        cat_id = await element.get_attribute('data-ref-dispcatno')
+                        
+                        if cat_id and cat_id.strip() and cat_id.isdigit():
+                            # 15자리 카테고리 ID만 추출
+                            if len(cat_id) == 15:
+                                cat_name = await element.inner_text()
+                                cat_name = cat_name.strip() if cat_name else ""
+                                
+                                if cat_name:  # 카테고리 이름이 있는 경우만 추가
+                                    categories[cat_id.strip()] = cat_name
+                                    self.logger.debug(f"서브 카테고리 추가: {cat_id} - {cat_name}")
+
+                    except Exception as e:
+                        self.logger.debug(f"서브 카테고리 요소 {i} 처리 중 오류: {e}")
+                        continue
+
+                # dict를 list of dict로 변환하고 ID순으로 정렬
+                category_list = [{"id": cat_id, "name": cat_name} 
+                               for cat_id, cat_name in sorted(categories.items())]
+                
+                self.logger.info(f"전체 카테고리 {len(category_list)}개 추출 완료")
+                
+                # 카테고리 구조 분석 로깅
+                by_length = {}
+                for category in category_list:
+                    cat_id = category["id"]
+                    length = len(cat_id)
+                    if length not in by_length:
+                        by_length[length] = []
+                    by_length[length].append(f"{cat_id}({category['name']})")
+                
+                self.logger.info("카테고리 구조:")
+                for length in sorted(by_length.keys()):
+                    count = len(by_length[length])
+                    examples = ', '.join(by_length[length][:3])
+                    if count > 3:
+                        examples += '...'
+                    self.logger.info(f"  길이 {length:2d}자리: {count:3d}개 - {examples}")
+                
+                return category_list
+                
+            finally:
+                await main_page.close()
+                
         except Exception as e:
-            self.logger.error(f"Oliveyoung 카테고리 목록 추출 실패: {str(e)}")
+            self.logger.error(f"전체 카테고리 ID 추출 실패: {str(e)}")
             return []
     
+    async def _extract_categories(self) -> List[str]:
+        """기존 메서드 호환성을 위한 래퍼. 카테고리 ID만 반환."""
+        categories = await self.extract_all_category_ids()
+        return [category["id"] for category in categories]
+    
     async def _extract_goods_no_list_from_category(self, category_id: str, max_items: int = 48) -> List[str]:
-        """카테고리 페이지에서 goodsNo 목록을 추출한다."""
+        """
+        카테고리 페이지에서 goodsNo 목록을 추출한다.
+        지속적인 list_page를 사용하여 효율성을 높인다.
+        """
         try:
-            url = self.CATEGORY_URL_TEMPLATE.format(categoryId=category_id)
-            
-            if not self.persistent_context:
-                self.persistent_context = await self.create_context()
-                
-            page = await self.persistent_context.new_page()
-            
-            if not await self.safe_goto(page, url):
-                await page.close()
+            # 카테고리 목록 페이지 준비 (지속적으로 유지)
+            if not await self.ensure_list_page(category_id):
+                self.logger.error(f"카테고리 페이지 준비 실패: {category_id}")
                 return []
             
-            # 페이지 로딩 대기
-            from .utils import random_delay
-            await random_delay(3, 5)
-            
             # 상품 링크에서 goodsNo 추출
-            product_links = page.locator('a[href*="goodsNo="]')
+            product_links = self.list_page.locator('a[href*="goodsNo="]')
             link_count = await product_links.count()
             
             goods_no_list = []
             processed_count = 0
             
+            self.logger.info(f"카테고리 {category_id}에서 {link_count}개 상품 링크 발견")
+            
             for i in range(min(link_count, max_items * 2)):  # 여유있게 추출 (중복 고려)
                 if processed_count >= max_items:
                     break
                     
-                link = product_links.nth(i)
-                href = await link.get_attribute('href')
-                
-                if href and 'goodsNo=' in href:
-                    # goodsNo 값 추출
-                    match = re.search(r'goodsNo=([A-Z0-9]+)', href)
-                    if match:
-                        goods_no = match.group(1)
-                        if goods_no not in goods_no_list:  # 중복 제거
-                            goods_no_list.append(goods_no)
-                            processed_count += 1
-            
-            await page.close()
+                try:
+                    link = product_links.nth(i)
+                    href = await link.get_attribute('href')
+                    
+                    if href and 'goodsNo=' in href:
+                        # goodsNo 값 추출
+                        match = re.search(r'goodsNo=([A-Z0-9]+)', href)
+                        if match:
+                            goods_no = match.group(1)
+                            if goods_no not in goods_no_list:  # 중복 제거
+                                goods_no_list.append(goods_no)
+                                processed_count += 1
+                                
+                except Exception as e:
+                    self.logger.debug(f"상품 링크 {i} 처리 중 오류: {e}")
+                    continue
             
             self.logger.info(f"Oliveyoung 카테고리 {category_id}에서 {len(goods_no_list)}개 goodsNo 추출")
             return goods_no_list
