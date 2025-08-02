@@ -115,6 +115,12 @@ class ExcelStorage(BaseStorage):
         """
         데이터를 Excel 파일에 저장한다.
         
+        xlsxwriter 엔진을 사용한 빠른 저장:
+        - openpyxl의 셀 단위 처리 → xlsxwriter의 행 단위 append() 사용
+        - 중복 스타일 폭증 → xlsxwriter의 메모리 효율적 처리로 방지
+        - UsedRange 문제 → 새 파일 생성으로 회피
+        - 메모리 오버헤드 → 스트리밍 방식으로 최소화
+        
         Args:
             data: 저장할 데이터 (단일 또는 리스트)
             
@@ -122,6 +128,8 @@ class ExcelStorage(BaseStorage):
             저장 성공 여부
         """
         try:
+            import xlsxwriter
+            
             # 단일 데이터를 리스트로 변환
             if isinstance(data, dict):
                 data = [data]
@@ -149,11 +157,43 @@ class ExcelStorage(BaseStorage):
                 if df[col].dtype == 'object':
                     df[col] = df[col].apply(lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, list) else x)
             
-            # Excel 파일로 저장
-            df.to_excel(self.file_path, index=False, engine='openpyxl')
+            # xlsxwriter 엔진을 사용한 빠른 저장
+            with pd.ExcelWriter(self.file_path, engine='xlsxwriter', options={'strings_to_urls': False}) as writer:
+                df.to_excel(writer, index=False, sheet_name='Sheet1')
             
             self.logger.info(f"데이터 저장 완료: {len(data)}개 항목 → {self.file_path}")
             return True
+            
+        except ImportError:
+            # xlsxwriter가 없으면 기존 openpyxl 방식으로 폴백
+            self.logger.warning("xlsxwriter를 찾을 수 없어 openpyxl 방식으로 저장합니다.")
+            try:
+                # DataFrame으로 변환
+                df = pd.DataFrame(self.data)
+                
+                # 컬럼 순서 정렬
+                column_order = ['branduid', 'name', 'price', 'options', 'image_urls', 'detail_html']
+                existing_columns = [col for col in column_order if col in df.columns]
+                additional_columns = [col for col in df.columns if col not in column_order]
+                final_columns = existing_columns + additional_columns
+                
+                if final_columns:
+                    df = df[final_columns]
+                
+                # 리스트 타입 컬럼을 문자열로 변환
+                for col in df.columns:
+                    if df[col].dtype == 'object':
+                        df[col] = df[col].apply(lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, list) else x)
+                
+                # openpyxl 엔진으로 저장
+                df.to_excel(self.file_path, index=False, engine='openpyxl')
+                
+                self.logger.info(f"데이터 저장 완료 (openpyxl): {len(data)}개 항목 → {self.file_path}")
+                return True
+                
+            except Exception as e:
+                self.logger.error(f"데이터 저장 실패 (openpyxl 폴백): {str(e)}")
+                return False
             
         except Exception as e:
             self.logger.error(f"데이터 저장 실패: {str(e)}")

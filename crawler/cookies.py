@@ -112,7 +112,7 @@ class OliveyoungCookieManager:
             self.logger.info(f"올리브영 메인 페이지 접속: {self.BOOTSTRAP_URL}")
             response = await page.goto(
                 self.BOOTSTRAP_URL, 
-                wait_until="networkidle",
+                wait_until="domcontentloaded",
                 timeout=60000
             )
             
@@ -138,7 +138,7 @@ class OliveyoungCookieManager:
             
             # 기본 로드 완료 대기
             try:
-                await page.wait_for_load_state("networkidle", timeout=30000)
+                await page.wait_for_load_state("domcontentloaded", timeout=30000)
                 await asyncio.sleep(5)  # 추가 안정화 대기
             except Exception as e:
                 self.logger.warning(f"페이지 로드 대기 중 오류: {e}")

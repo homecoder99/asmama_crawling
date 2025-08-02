@@ -41,7 +41,7 @@ class FieldTransformer:
         
         # 배송비 및 마진 설정
         self.shipping_cost = 7500  # 배송비 7500원
-        self.margin_rate = 1.2644  # 마진율 26.44%
+        self.margin_rate = 1.1  # 마진율 10%
         
         # 카테고리 매핑 캐시
         self._category_mapping_cache = {}

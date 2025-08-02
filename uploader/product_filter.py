@@ -79,66 +79,73 @@ class ProductFilter:
         filtered_products = []
         
         for product in products:
-            branduid = product.get("branduid", "unknown")
+            # 제품 ID 추출 (Asmama: branduid, Oliveyoung: goods_no)
+            product_id = product.get("branduid") or product.get("goods_no", "unknown")
             
             # 1. 대표 이미지 필수 검증 (이미지 필터링 결과 확인)
             if not self._has_representative_image(product):
                 stats["removal_reasons"]["no_representative_image"] += 1
                 stats["detailed_removals"].append({
-                    "branduid": branduid,
+                    "product_id": product_id,
                     "reason": "no_representative_image",
                     "details": "대표 이미지 없음"
                 })
+                self.logger.warning(f"대표 이미지 없음: {product_id}")
                 continue
             
             # 2. 금지 브랜드 검증
             if self._is_banned_brand(product):
                 stats["removal_reasons"]["banned_brand"] += 1
                 stats["detailed_removals"].append({
-                    "branduid": branduid,
+                    "product_id": product_id,
                     "reason": "banned_brand",
                     "details": product.get("brand_name", "")
                 })
+                self.logger.warning(f"금지 브랜드: {product_id} - {product.get('brand_name', '')}")
                 continue
             
             # 3. 기등록 상품 검증
             if self._is_already_registered(product):
                 stats["removal_reasons"]["already_registered"] += 1
                 stats["detailed_removals"].append({
-                    "branduid": branduid,
+                    "product_id": product_id,
                     "reason": "already_registered",
-                    "details": branduid
+                    "details": product_id
                 })
+                self.logger.warning(f"기등록 상품: {product_id}")
                 continue
             
             # 4. 카테고리 유효성 검증
             if not self._is_valid_category(product):
                 stats["removal_reasons"]["invalid_category"] += 1
                 stats["detailed_removals"].append({
-                    "branduid": branduid,
+                    "product_id": product_id,
                     "reason": "invalid_category",
                     "details": product.get("category_name", "")
                 })
+                self.logger.warning(f"유효하지 않은 카테고리: {product_id} - {product.get('category_name', '')}")
                 continue
             
             # 5. 카테고리 번호 매핑 가능성 검증
             if not self._can_map_category(product):
                 stats["removal_reasons"]["no_category_mapping"] += 1
                 stats["detailed_removals"].append({
-                    "branduid": branduid,
+                    "product_id": product_id,
                     "reason": "no_category_mapping",
                     "details": product.get("category_name", "")
                 })
+                self.logger.warning(f"카테고리 번호 매핑 불가: {product_id} - {product.get('category_name', '')}")
                 continue
             
             # 6. 브랜드 번호 매핑 가능성 검증
             if not self._can_map_brand(product):
                 stats["removal_reasons"]["no_brand_mapping"] += 1
                 stats["detailed_removals"].append({
-                    "branduid": branduid,
+                    "product_id": product_id,
                     "reason": "no_brand_mapping",
                     "details": product.get("brand_name", "")
                 })
+                self.logger.warning(f"브랜드 번호 매핑 불가: {product_id} - {product.get('brand_name', '')}")
                 continue
             
             # 7. 필수 필드 존재 여부 검증
@@ -146,29 +153,32 @@ class ProductFilter:
             if missing_field:
                 stats["removal_reasons"]["missing_required_fields"] += 1
                 stats["detailed_removals"].append({
-                    "branduid": branduid,
+                    "product_id": product_id,
                     "reason": "missing_required_fields",
                     "details": missing_field
                 })
+                self.logger.warning(f"필수 필드 누락: {product_id} - {missing_field}")
                 continue
             
             # 8. 경고 키워드 검증 및 AI 수정
             warning_keyword = self._contains_warning_keyword(product)
             if warning_keyword:
+                self.logger.warning(f"경고 키워드 발견: {product_id} - {warning_keyword}")
                 modified_product = self._fix_warning_keyword(product, warning_keyword)
                 if modified_product:
                     stats["modifications"]["warning_keyword_fixed"] += 1
                     stats["modified_products"] += 1
                     stats["detailed_modifications"].append({
-                        "branduid": branduid,
+                        "product_id": product_id,
                         "warning_keyword": warning_keyword,
                         "original_name": product.get("item_name", ""),
                         "modified_name": modified_product.get("item_name", "")
                     })
                     product = modified_product
+                    self.logger.info(f"경고 키워드 수정 완료: {product_id} - {warning_keyword} → {modified_product.get('item_name', '')}")
                 else:
                     # AI 수정 실패 시 원본 유지하고 경고 로그
-                    self.logger.warning(f"경고 키워드 수정 실패: {branduid} - {warning_keyword}")
+                    self.logger.warning(f"경고 키워드 수정 실패: {product_id} - {warning_keyword}")
             
             # 모든 검증 통과
             filtered_products.append(product)
@@ -332,6 +342,10 @@ class ProductFilter:
         Returns:
             카테고리 유효 여부
         """
+        # 올리브영 제품은 카테고리 검사 패스
+        if product.get("goods_no"):
+            return True
+            
         category_name = str(product.get("category_name", "")).strip()
         if not category_name:
             return False
@@ -352,6 +366,10 @@ class ProductFilter:
         Returns:
             카테고리 매핑 가능 여부
         """
+        # 올리브영 제품은 카테고리 검사 패스
+        if product.get("goods_no"):
+            return True
+
         category_name = str(product.get("category_name", "")).strip()
         if not category_name:
             return False
@@ -392,6 +410,10 @@ class ProductFilter:
         Returns:
             브랜드 매핑 가능 여부
         """
+        # 올리브영 제품은 브랜드 검사 패스
+        if product.get("goods_no"):
+            return True
+        
         brand_name = str(product.get("brand_name", "")).strip()
         if not brand_name:
             return False
@@ -404,39 +426,6 @@ class ProductFilter:
         brand_number = self.template_loader.get_brand_number(brand_name)
         return brand_number is not None
     
-    def _check_required_fields(self, product: Dict[str, Any]) -> str:
-        """
-        필수 필드가 존재하는지 확인한다.
-        
-        Args:
-            product: 상품 데이터
-            
-        Returns:
-            누락된 필드명 (없으면 빈 문자열)
-        """
-        # 필수 필드 목록
-        required_fields = [
-            "unique_item_id",
-            "item_name",
-            "price"
-        ]
-        
-        for field in required_fields:
-            value = product.get(field, "")
-            if not value or (isinstance(value, str) and not value.strip()):
-                return field
-        
-        # 가격이 0 이하인 경우
-        try:
-            price = product.get("price", 0)
-            if isinstance(price, str):
-                price = int(price.replace(",", "")) if price.replace(",", "").isdigit() else 0
-            if price <= 0:
-                return "price (가격이 0 이하)"
-        except:
-            return "price (가격 형식 오류)"
-        
-        return ""
     
     def get_filter_summary(self, stats: Dict[str, Any]) -> str:
         """
@@ -493,7 +482,7 @@ class ProductFilter:
         if detailed_removals:
             summary.append("📋 제거된 상품 예시 (최대 5개):")
             for removal in detailed_removals:
-                summary.append(f"  • {removal['branduid']}: {removal['reason']} - {removal['details']}")
+                summary.append(f"  • {removal['product_id']}: {removal['reason']} - {removal['details']}")
             summary.append("")
         
         # 상세 수정 예시 (최대 5개)
@@ -501,9 +490,45 @@ class ProductFilter:
         if detailed_modifications:
             summary.append("✏️ 수정된 상품 예시 (최대 5개):")
             for modification in detailed_modifications:
-                summary.append(f"  • {modification['branduid']}: '{modification['original_name']}' → '{modification['modified_name']}'")
+                summary.append(f"  • {modification['product_id']}: '{modification['original_name']}' → '{modification['modified_name']}'")
         
         return "\n".join(summary)
+    
+    def _check_required_fields(self, product: Dict[str, Any]) -> Optional[str]:
+        """
+        필수 필드 존재 여부를 확인한다. (Asmama/Oliveyoung 대응)
+        
+        Args:
+            product: 상품 데이터
+            
+        Returns:
+            누락된 필드명 또는 None
+        """
+        try:
+            # 공통 필수 필드
+            common_required = ['item_name', 'brand_name', 'price', 'images']
+            
+            # Asmama 특화 필수 필드
+            if 'branduid' in product:
+                asmama_required = ['branduid', 'category_name']
+                required_fields = common_required + asmama_required
+            # Oliveyoung 특화 필수 필드  
+            elif 'goods_no' in product:
+                oliveyoung_required = ['goods_no', 'category_main']
+                required_fields = common_required + oliveyoung_required
+            else:
+                return "product_identifier"  # branduid 또는 goods_no 없음
+            
+            for field in required_fields:
+                value = product.get(field)
+                if not value or (isinstance(value, str) and not value.strip()):
+                    return field
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"필수 필드 체크 실패: {str(e)}")
+            return "validation_error"
     
     def clear_cache(self):
         """

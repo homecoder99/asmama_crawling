@@ -16,8 +16,8 @@ The crawler outputs data to Excel files with PostgreSQL-compatible schema and in
 ### Setup and Installation
 
 ```bash
-make install          # Install dependencies + Playwright browser
-make setup           # Create data/logs directories
+make install          # Install dependencies + Playwright browser (uses uv)
+make setup           # Create data/logs directories + upload templates
 make dev             # Full dev environment setup (install + unit tests)
 ```
 
@@ -70,6 +70,16 @@ pytest tests/test_specific.py -v    # Single test file
 make lint            # flake8 + black check + mypy
 make format          # Apply black formatting
 make ci             # Full CI pipeline (install + lint + test)
+```
+
+### Data Processing & Upload
+
+```bash
+make validate        # Validate and clean crawled data
+make validate-celeb  # Validate data requiring celebrity info
+make analyze         # Generate analysis report
+make upload          # Convert to Qoo10 upload format
+make workflow        # Full workflow: crawl → validate → analyze → upload
 ```
 
 ### Development Tools
@@ -170,7 +180,10 @@ crawler/           # Core crawling logic
 ├── asmama.py     # Asmama-specific crawler implementation
 ├── oliveyoung.py # Oliveyoung-specific crawler implementation
 ├── storage.py    # Storage interfaces (Excel/JSON)
-└── utils.py      # Utilities (logging, delays, parsing)
+├── utils.py      # Utilities (logging, delays, parsing)
+├── cookies.py    # Cookie management system
+├── validator.py  # Data validation utilities
+├── oliveyoung_*.py # Oliveyoung specialized modules (extractors, categories, etc.)
 
 playground/       # Development and debugging tools
 ├── test_crawler.py            # Basic Asmama crawler testing
@@ -180,6 +193,13 @@ playground/       # Development and debugging tools
 ├── analyze_data.py            # Data analysis and statistics
 ├── debug_session.py           # Asmama step-by-step debugging
 └── debug_oliveyoung_session.py # Oliveyoung step-by-step debugging
+
+uploader/         # Qoo10 upload data transformation
+├── uploader.py      # Main upload transformer
+├── data_loader.py   # Excel data loading utilities
+├── image_processor.py # Image processing and filtering
+├── product_filter.py  # Product filtering logic
+└── field_transformer.py # Field mapping and transformation
 
 tests/           # Test suite
 ├── test_utils.py          # Utility function tests
@@ -353,6 +373,35 @@ def new_function(param: str) -> bool:
     """
 ```
 
+## Package Management
+
+This project uses **uv** for Python package management instead of pip. All Makefile commands are configured to use uv automatically:
+
+```bash
+# Virtual environment is managed via uv
+make install    # Creates .venv and installs dependencies with uv
+source .venv/bin/activate    # Activate virtual environment manually if needed
+```
+
+## Data Processing Pipeline
+
+### Validation System
+
+The project includes a comprehensive data validation system in `crawler/validator.py`:
+
+- **Product filtering**: Removes invalid/incomplete products
+- **Celebrity information**: Optional requirement for specific validation modes
+- **Data cleaning**: Standardizes formats and removes duplicates
+
+### Upload Transformation
+
+The `uploader/` module converts crawled data to Qoo10-compatible format:
+
+- **Template-based**: Uses Excel templates for consistent formatting
+- **Image processing**: Advanced filtering and validation of product images
+- **Brand filtering**: Excludes banned brands and applies warning keyword filters
+- **Field mapping**: Transforms crawler data to marketplace-specific fields
+
 ## Task Master AI Integration
 
 This project uses Task Master AI for progress tracking. Current completion: 75% (9/12 tasks).
@@ -362,3 +411,9 @@ Use `make test` to verify acceptance criteria: 30+ items crawled, comprehensive 
 
 **Import Task Master's development workflow commands and guidelines, treat as if import is in the main CLAUDE.md file.**
 @./.taskmaster/CLAUDE.md
+
+# important-instruction-reminders
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.

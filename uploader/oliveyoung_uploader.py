@@ -1,22 +1,22 @@
-"""크롤링 데이터를 Qoo10 업로드 형식으로 변환하는 통합 시스템."""
+"""Oliveyoung 크롤링 데이터를 Qoo10 업로드 형식으로 변환하는 메인 시스템."""
 
 import os
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional
 import pandas as pd
 from datetime import datetime
 
 from data_loader import TemplateLoader
 from image_processor import ImageProcessor
 from product_filter import ProductFilter
-from field_transformer import FieldTransformer
+from oliveyoung_field_transformer import OliveyoungFieldTransformer
 
 
-class AsamaUploader:
+class OliveyoungUploader:
     """
-    Asmama 크롤링 데이터를 Qoo10 업로드 형식으로 변환하는 메인 클래스.
+    Oliveyoung 크롤링 데이터를 Qoo10 업로드 형식으로 변환하는 메인 클래스.
     
     전체 워크플로:
     1. 템플릿 파일 로딩
@@ -28,7 +28,7 @@ class AsamaUploader:
     
     def __init__(self, templates_dir: str, output_dir: str = "output", image_filter_mode: str = "advanced"):
         """
-        AsamaUploader 초기화.
+        OliveyoungUploader 초기화.
         
         Args:
             templates_dir: 템플릿 파일들이 있는 디렉토리
@@ -44,7 +44,7 @@ class AsamaUploader:
         
         # 구성 요소 초기화
         self.template_loader = TemplateLoader(templates_dir)
-        self.image_processor = ImageProcessor(filter_mode=image_filter_mode, site="asmama")
+        self.image_processor = ImageProcessor(filter_mode=image_filter_mode, site="oliveyoung")
         self.product_filter = None  # template_loader 로딩 후 초기화
         self.field_transformer = None  # template_loader 로딩 후 초기화
         
@@ -69,8 +69,8 @@ class AsamaUploader:
             if success:
                 # 템플릿 로딩 후 필터링 및 변환 시스템 초기화
                 self.product_filter = ProductFilter(self.template_loader)
-                self.field_transformer = FieldTransformer(self.template_loader)
-                self.logger.info("템플릿 로딩 및 시스템 초기화 완료")
+                self.field_transformer = OliveyoungFieldTransformer(self.template_loader)
+                self.logger.info("Oliveyoung 템플릿 로딩 및 시스템 초기화 완료")
             return success
         except Exception as e:
             self.logger.error(f"템플릿 로딩 실패: {str(e)}")
@@ -89,12 +89,13 @@ class AsamaUploader:
         try:
             # 1. 입력 데이터 로딩
             products = self._load_crawled_data(input_file)
+    
             if not products:
                 self.logger.error("입력 데이터 로딩 실패")
                 return False
             
             self.stats["total_input_products"] = len(products)
-            self.logger.info(f"test 입력 데이터 로딩 완료: {len(products)}개 상품")
+            self.logger.info(f"Oliveyoung 입력 데이터 로딩 완료: {len(products)}개 상품")
             
             # 2. 이미지 품질 검사 및 대표 이미지 선정
             image_processed_products = self._process_images(products)
@@ -159,7 +160,14 @@ class AsamaUploader:
                     if pd.isna(value):
                         product[key] = ""
             
-            self.logger.info(f"크롤링 데이터 로딩 완료: {len(products)}개 상품")
+            # Oliveyoung 데이터 구조 검증
+            required_fields = ['goods_no', 'item_name', 'brand_name', 'price']
+            for product in products:
+                for field in required_fields:
+                    if field not in product:
+                        self.logger.warning(f"필수 필드 누락: {field}")
+            
+            self.logger.info(f"Oliveyoung 크롤링 데이터 로딩 완료: {len(products)}개 상품")
             return products
             
         except Exception as e:
@@ -188,7 +196,7 @@ class AsamaUploader:
                     self.logger.info(f"이미지 처리 진행중: {i}/{len(products)}개 완료")
                     
             except Exception as e:
-                self.logger.error(f"이미지 처리 실패: {product.get('branduid', 'unknown')} - {str(e)}")
+                self.logger.error(f"이미지 처리 실패: {product.get('goods_no', 'unknown')} - {str(e)}")
                 processed_products.append(product)  # 실패해도 원본 데이터 유지
         
         self.logger.info(f"이미지 처리 완료: {len(processed_products)}개 상품")
@@ -246,7 +254,7 @@ class AsamaUploader:
             # 빠른 엑셀 저장 (write_only 모드 사용)
             output_file = self._save_excel_fast(products, sample_file, self.output_dir)
             
-            self.logger.info(f"샘플 템플릿 기반 Excel 파일 저장 완료: {output_file} ({len(products)}개 상품)")
+            self.logger.info(f"Oliveyoung 샘플 템플릿 기반 Excel 파일 저장 완료: {output_file} ({len(products)}개 상품)")
             return True
             
         except Exception as e:
@@ -302,14 +310,14 @@ class AsamaUploader:
             
             # 7) 출력 파일 저장
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_file = output_dir / f"qoo10_upload_{timestamp}.xlsx"
+            output_file = output_dir / f"qoo10_oliveyoung_upload_{timestamp}.xlsx"
             wb.save(output_file)
             
-            self.logger.info(f"빠른 엑셀 저장 완료: {output_file} ({len(products)}개 상품)")
+            self.logger.info(f"Oliveyoung 빠른 엑셀 저장 완료: {output_file} ({len(products)}개 상품)")
             return output_file
             
         except Exception as e:
-            self.logger.error(f"빠른 엑셀 저장 실패: {str(e)}")
+            self.logger.error(f"Oliveyoung 빠른 엑셀 저장 실패: {str(e)}")
             raise
     
     def _generate_report(self, filter_stats: Dict[str, Any]) -> None:
@@ -321,11 +329,11 @@ class AsamaUploader:
         """
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            report_file = self.output_dir / f"processing_report_{timestamp}.txt"
+            report_file = self.output_dir / f"oliveyoung_processing_report_{timestamp}.txt"
             
             # 리포트 내용 생성
             report_lines = []
-            report_lines.append("🚀 Asmama → Qoo10 업로드 데이터 변환 리포트")
+            report_lines.append("🚀 Oliveyoung → Qoo10 업로드 데이터 변환 리포트")
             report_lines.append("=" * 60)
             report_lines.append("")
             
@@ -362,97 +370,12 @@ class AsamaUploader:
             
             # 콘솔에도 요약 출력
             print("\n" + "=" * 60)
-            print("🚀 Asmama → Qoo10 업로드 데이터 변환 완료!")
+            print("🚀 Oliveyoung → Qoo10 업로드 데이터 변환 완료!")
             print(f"📊 결과: {self.stats['total_input_products']:,}개 → {self.stats['final_output_products']:,}개 (성공률: {success_rate:.1f}%)")
             print("=" * 60)
             
         except Exception as e:
             self.logger.error(f"리포트 생성 실패: {str(e)}")
-
-
-def detect_data_source(input_file: str) -> str:
-    """
-    입력 데이터 파일의 소스를 자동 감지한다.
-    
-    Args:
-        input_file: 입력 파일 경로
-        
-    Returns:
-        데이터 소스 ('asmama', 'oliveyoung', 'unknown')
-    """
-    try:
-        input_path = Path(input_file)
-        
-        if input_path.suffix.lower() == '.xlsx':
-            df = pd.read_excel(input_path, nrows=1)  # 첫 번째 행만 로드
-        elif input_path.suffix.lower() == '.json':
-            with open(input_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                if isinstance(data, list) and data:
-                    df = pd.DataFrame([data[0]])  # 첫 번째 항목만
-                else:
-                    df = pd.DataFrame([data])
-        else:
-            return 'unknown'
-        
-        columns = set(df.columns)
-        
-        # Asmama 특화 필드 체크
-        asmama_fields = {'branduid', 'related_celeb', 'material', 'quantity', 'size', 'weight'}
-        asmama_score = len(asmama_fields.intersection(columns))
-        
-        # Oliveyoung 특화 필드 체크
-        oliveyoung_fields = {'goods_no', 'discount_info', 'benefit_info', 'category_main', 'category_sub', 'others'}
-        oliveyoung_score = len(oliveyoung_fields.intersection(columns))
-        
-        # 파일명 기반 추가 힌트
-        filename = input_path.stem.lower()
-        if 'oliveyoung' in filename:
-            oliveyoung_score += 2
-        elif 'asmama' in filename:
-            asmama_score += 2
-        
-        # 점수 기반 판정
-        if oliveyoung_score > asmama_score:
-            return 'oliveyoung'
-        elif asmama_score > oliveyoung_score:
-            return 'asmama'
-        
-        # source 필드 체크
-        if 'source' in columns:
-            source_values = df['source'].dropna().unique()
-            if len(source_values) > 0:
-                source = str(source_values[0]).lower()
-                if 'oliveyoung' in source:
-                    return 'oliveyoung'
-                elif 'asmama' in source:
-                    return 'asmama'
-        
-        return 'unknown'
-        
-    except Exception as e:
-        logging.error(f"데이터 소스 감지 실패: {str(e)}")
-        return 'unknown'
-
-
-def create_uploader(site: str, templates_dir: str, output_dir: str, image_filter_mode: str) -> Union['AsamaUploader', 'OliveyoungUploader']:
-    """
-    사이트에 맞는 업로더 인스턴스를 생성한다.
-    
-    Args:
-        site: 사이트 타입 ('asmama', 'oliveyoung')
-        templates_dir: 템플릿 디렉토리
-        output_dir: 출력 디렉토리
-        image_filter_mode: 이미지 필터링 모드
-        
-    Returns:
-        업로더 인스턴스
-    """
-    if site == 'oliveyoung':
-        from oliveyoung_uploader import OliveyoungUploader
-        return OliveyoungUploader(templates_dir, output_dir, image_filter_mode)
-    else:
-        return AsamaUploader(templates_dir, output_dir, image_filter_mode)
 
 
 def main():
@@ -461,10 +384,8 @@ def main():
     """
     import argparse
     
-    parser = argparse.ArgumentParser(description="크롤링 데이터를 Qoo10 업로드 형식으로 변환 (Asmama/Oliveyoung 지원)")
+    parser = argparse.ArgumentParser(description="Oliveyoung 크롤링 데이터를 Qoo10 업로드 형식으로 변환")
     parser.add_argument("--input", required=True, help="크롤링 데이터 파일 경로 (Excel/JSON)")
-    parser.add_argument("--site", choices=["asmama", "oliveyoung", "auto"], default="auto",
-                       help="사이트 타입 (기본값: auto - 자동 감지)")
     parser.add_argument("--templates", default="uploader/templates", help="템플릿 파일 디렉토리 (기본값: uploader/templates)")
     parser.add_argument("--output", default="output", help="출력 디렉토리 (기본값: output)")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
@@ -473,18 +394,6 @@ def main():
     
     args = parser.parse_args()
     
-    # 사이트 자동 감지
-    if args.site == "auto":
-        detected_site = detect_data_source(args.input)
-        if detected_site == 'unknown':
-            print("❌ 데이터 소스를 자동 감지할 수 없습니다. --site 옵션을 명시해주세요.")
-            return False
-        site = detected_site
-        print(f"🔍 자동 감지된 사이트: {site}")
-    else:
-        site = args.site
-        print(f"📋 지정된 사이트: {site}")
-    
     # 로그 디렉토리 생성
     LOGS_DIR = Path("logs")
     LOGS_DIR.mkdir(exist_ok=True)
@@ -492,7 +401,7 @@ def main():
     # 로그 파일 핸들러
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_handler = logging.FileHandler(
-        LOGS_DIR / f"{site}_uploader_{timestamp}.log",
+        LOGS_DIR / f"oliveyoung_uploader_{timestamp}.log",
         encoding='utf-8'
     )
     file_handler.setLevel(logging.DEBUG)  # 파일에는 DEBUG 레벨까지 저장
@@ -515,8 +424,8 @@ def main():
         force=True
     )
     
-    # 업로더 생성
-    uploader = create_uploader(site, args.templates, args.output, args.image_filter)
+    # 업로더 실행
+    uploader = OliveyoungUploader(args.templates, args.output, args.image_filter)
     
     try:
         # 템플릿 로딩
@@ -528,10 +437,10 @@ def main():
         success = uploader.process_crawled_data(args.input)
         
         if success:
-            print(f"✅ {site.capitalize()} 데이터 변환 성공!")
+            print("✅ Oliveyoung 데이터 변환 성공!")
             return True
         else:
-            print(f"❌ {site.capitalize()} 데이터 변환 실패")
+            print("❌ Oliveyoung 데이터 변환 실패")
             return False
             
     except Exception as e:
