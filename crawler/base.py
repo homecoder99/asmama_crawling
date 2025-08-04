@@ -190,6 +190,7 @@ class BaseCrawler(ABC):
             성공 여부
         """
         try:
+            # 자바스크립트 실행이 완료될 때까지 대기
             await page.goto(url, timeout=timeout, wait_until='domcontentloaded')
             await random_delay()
             return True

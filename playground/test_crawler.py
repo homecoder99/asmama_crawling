@@ -22,7 +22,7 @@ from crawler.utils import setup_logger
 
 logger = setup_logger(__name__)
 
-async def test_crawl_from_list(list_url: str, output_dir: str = "playground/results"):
+async def test_crawl_from_list(list_url: str, output_dir: str = "data"):
     """
     리스트 페이지 크롤링 테스트.
     """

@@ -289,6 +289,7 @@ class TemplateLoader:
     def get_brand_number(self, brand_name: str) -> Optional[str]:
         """
         브랜드명에 해당하는 브랜드 번호를 반환한다.
+        공백 제거 및 대소문자 무시하여 매칭한다.
         
         Args:
             brand_name: 브랜드명
@@ -299,11 +300,24 @@ class TemplateLoader:
         if self.brand_data is None or self.brand_data.empty:
             return None
         
+        if not brand_name or not brand_name.strip():
+            return None
+            
+        # 검색할 브랜드명 정규화 (공백 제거, 소문자 변환)
+        normalized_search = brand_name.strip().lower().replace(" ", "")
+        
         # 브랜드명으로 검색하여 번호 반환
         for idx, row in self.brand_data.iterrows():
-            if brand_name in row.values:
-                # 첫 번째 컬럼을 번호로 가정
-                return str(row.iloc[0])
+            for cell_value in row.values:
+                if pd.isna(cell_value):
+                    continue
+                    
+                # 셀 값 정규화 (공백 제거, 소문자 변환)
+                normalized_cell = str(cell_value).strip().lower().replace(" ", "")
+                
+                if normalized_search == normalized_cell:
+                    # 첫 번째 컬럼을 번호로 가정
+                    return str(row.iloc[0])
         
         return None
     

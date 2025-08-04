@@ -35,6 +35,9 @@ target.html
 playground/results
 uploader/output
 
+# Cookie state files
+oy_state.json
+
 # Task files
 # tasks.json
 # tasks/ 

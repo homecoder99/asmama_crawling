@@ -27,7 +27,7 @@ class ImageProcessor:
     이미지를 필터링하고 대표 이미지를 선정한다.
     """
     
-    def __init__(self, filter_mode: str = "advanced"):
+    def __init__(self, filter_mode: str = "advanced", site: str = "asmama"):
         """
         ImageProcessor 초기화.
         
@@ -36,9 +36,11 @@ class ImageProcessor:
                 - "ai": OpenAI Vision API만 사용
                 - "advanced": 고급 로직 필터링만 사용
                 - "both": 두 방법 모두 사용 (기본값)
+            site: 사이트 타입 ("asmama", "oliveyoung")
         """
         self.logger = logging.getLogger(__name__)
         self.filter_mode = filter_mode
+        self.site = site
         
         # OpenAI 클라이언트 (AI 모드일 때만 초기화)
         if filter_mode in ["ai", "both"]:
@@ -95,18 +97,67 @@ class ImageProcessor:
         self.max_images_per_product = 10  # 상품당 최대 이미지 수
         self.min_pass_rules = 6  # 최소 통과해야 할 규칙 수 (완화: 6/8)
         
-        # 고급 필터링 기준 (베이지/회색 배경 대응)
-        self.border_threshold = 180  # 테두리 흰색 임계값 (베이지 배경 대응: 220→180)
-        self.border_ratio = 0.05  # 테두리 영역 비율 (완화: 0.1→0.05)
-        self.white_threshold = 180  # 흰색 픽셀 임계값 (베이지 배경 대응: 200→180)
-        self.center_white_max = 0.98  # 중앙 영역 허용 최대 흰색 비율 (상품 중심: 0.95→0.98)
-        self.outside_white_min = 0.2  # 외곽 영역 허용 최소 흰색 비율 (베이지 배경: 0.3→0.2)
+        # 사이트별 고급 필터링 파라미터 설정
+        self._set_site_parameters(site)
         
         # 이미지 다운로드용 세션 생성
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         })
+    
+    def _set_site_parameters(self, site: str):
+        """
+        사이트별 고급 필터링 파라미터를 설정한다.
+        
+        Args:
+            site: 사이트 타입 ("asmama", "oliveyoung")
+        """
+        if site == "asmama":
+            # Asmama 파라미터 (기존 설정)
+            self.border_threshold = 180  # 테두리 흰색 임계값 (베이지 배경 대응)
+            self.border_ratio = 0.05  # 테두리 영역 비율 (완화)
+            self.white_threshold = 180  # 흰색 픽셀 임계값 (베이지 배경 대응)
+            self.center_white_max = 0.98  # 중앙 영역 허용 최대 흰색 비율 (상품 중심)
+            self.outside_white_min = 0.2  # 외곽 영역 허용 최소 흰색 비율 (베이지 배경)
+            
+            # Asmama 전용 파라미터
+            self.measure_white_threshold = 230
+            self.border_check_threshold = 240
+            self.border_check_ratio = 0.1
+            self.border_pass_threshold = 0.9  # 90% 이상만 흰색이면 통과
+            self.center_outside_threshold = 220
+            
+        elif site == "oliveyoung":
+            # Oliveyoung 파라미터 (새로운 설정)
+            self.border_threshold = 250  # 더 엄격한 흰색 기준
+            self.border_ratio = 0.1  # 표준 테두리 영역 비율
+            self.white_threshold = 230  # 표준 흰색 픽셀 임계값
+            self.center_white_max = 0.95  # 중앙 영역 허용 최대 흰색 비율
+            self.outside_white_min = 0.3  # 외곽 영역 허용 최소 흰색 비율
+            
+            # Oliveyoung 전용 파라미터
+            self.measure_white_threshold = 230
+            self.border_check_threshold = 250
+            self.border_check_ratio = 0.1
+            self.border_pass_threshold = 0.9  # 1-n (90%) 기준
+            self.center_outside_threshold = 230
+            
+        else:
+            # 기본값 (asmama와 동일)
+            self.border_threshold = 180
+            self.border_ratio = 0.05
+            self.white_threshold = 180
+            self.center_white_max = 0.98
+            self.outside_white_min = 0.2
+            
+            self.measure_white_threshold = 230
+            self.border_check_threshold = 240
+            self.border_check_ratio = 0.1
+            self.border_pass_threshold = 0.9
+            self.center_outside_threshold = 220
+        
+        self.logger.info(f"{site.capitalize()} 사이트 파라미터 설정 완료")
     
     def check_product_image(self, url: str) -> Dict[str, Any]:
         """
@@ -246,7 +297,7 @@ class ImageProcessor:
             self.logger.error(f"이미지 다운로드 실패: {url} - {str(e)}")
             raise
     
-    def _measure_white_ratio_in_region(self, img: Image.Image, x1: int, y1: int, x2: int, y2: int, threshold: int = 230) -> float:
+    def _measure_white_ratio_in_region(self, img: Image.Image, x1: int, y1: int, x2: int, y2: int, threshold: int = None) -> float:
         """
         이미지의 특정 영역에서 흰색 픽셀의 비율을 측정한다.
         
@@ -259,6 +310,9 @@ class ImageProcessor:
             흰색 픽셀의 비율 (0.0 ~ 1.0)
         """
         try:
+            if threshold is None:
+                threshold = self.measure_white_threshold
+                
             cropped = img.crop((x1, y1, x2, y2))
             pixels = np.array(cropped)
             if len(pixels.shape) != 3 or pixels.shape[2] != 3:
@@ -274,7 +328,7 @@ class ImageProcessor:
         except Exception:
             return 0.0
     
-    def _check_border_white(self, img: Image.Image, n: float = 0.1, threshold: int = 240) -> bool:
+    def _check_border_white(self, img: Image.Image, n: float = None, threshold: int = None) -> bool:
         """
         이미지의 테두리 영역이 충분히 흰색인지 확인한다.
         
@@ -287,6 +341,11 @@ class ImageProcessor:
             모든 테두리 영역이 충분히 흰색이면 True
         """
         try:
+            if n is None:
+                n = self.border_check_ratio
+            if threshold is None:
+                threshold = self.border_check_threshold
+                
             w, h = img.size
             if w < 10 or h < 10:
                 return False
@@ -299,12 +358,17 @@ class ImageProcessor:
             left = self._measure_white_ratio_in_region(img, 0, 0, x_th, h, threshold)
             right = self._measure_white_ratio_in_region(img, w - x_th, 0, w, h, threshold)
 
-            # 완화된 기준: 90% 이상만 흰색이면 통과
-            return all(r >= 0.9 for r in [top, bottom, left, right])
+            # 사이트별 기준 적용
+            if self.site == "oliveyoung":
+                # Oliveyoung: 1-n 기준
+                return all(r >= 1 - n for r in [top, bottom, left, right])
+            else:
+                # Asmama: 고정 90% 기준
+                return all(r >= self.border_pass_threshold for r in [top, bottom, left, right])
         except Exception:
             return False
     
-    def _measure_center_outside_white_ratio(self, img: Image.Image, threshold: int = 220) -> tuple:
+    def _measure_center_outside_white_ratio(self, img: Image.Image, threshold: int = None) -> tuple:
         """
         이미지의 중앙 영역과 외곽 영역의 흰색 픽셀 비율을 측정한다.
         
@@ -316,6 +380,9 @@ class ImageProcessor:
             (중앙 영역 흰색 비율, 외곽 영역 흰색 비율)
         """
         try:
+            if threshold is None:
+                threshold = self.center_outside_threshold
+                
             w, h = img.size
             x1, x2 = int(0.3 * w), int(0.7 * w)
             y1, y2 = int(0.3 * h), int(0.7 * h)
@@ -535,7 +602,8 @@ class ImageProcessor:
         """
         images_str = product_data.get("images", "")
         if not images_str:
-            self.logger.warning(f"이미지가 없는 상품: {product_data.get('branduid', 'unknown')}")
+            product_id = product_data.get('branduid') or product_data.get('goods_no', 'unknown')
+            self.logger.warning(f"이미지가 없는 상품: {product_id}")
             product_data["alternative_images"] = ""
             product_data["representative_image"] = ""
             return product_data
@@ -581,16 +649,19 @@ class ImageProcessor:
                 product_data["representative_image"] = selected_images[0]["url"]  # 가장 높은 점수의 이미지
                 product_data["alternative_images"] = "$$".join(filtered_urls[1:]) # 대표 이미지 외 추가 이미지
 
-                self.logger.info(f"이미지 처리 완료: {product_data.get('branduid')} - {len(image_urls)}개 → {len(selected_images)}개")
+                product_id = product_data.get('branduid') or product_data.get('goods_no', 'unknown')
+                self.logger.info(f"이미지 처리 완료: {product_id} - {len(image_urls)}개 → {len(selected_images)}개")
             else:
                 product_data["alternative_images"] = ""
                 product_data["representative_image"] = ""
-                self.logger.warning(f"규칙 통과 이미지 없음: {product_data.get('branduid')}")
+                product_id = product_data.get('branduid') or product_data.get('goods_no', 'unknown')
+                self.logger.warning(f"규칙 통과 이미지 없음: {product_id}")
             
             return product_data
             
         except Exception as e:
-            self.logger.error(f"이미지 처리 실패: {product_data.get('branduid')} - {str(e)}")
+            product_id = product_data.get('branduid') or product_data.get('goods_no', 'unknown')
+            self.logger.error(f"이미지 처리 실패: {product_id} - {str(e)}")
 
             product_data["alternative_images"] = ""
             product_data["representative_image"] = ""
