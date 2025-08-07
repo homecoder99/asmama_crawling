@@ -158,7 +158,8 @@ class ExcelStorage(BaseStorage):
                     df[col] = df[col].apply(lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, list) else x)
             
             # xlsxwriter 엔진을 사용한 빠른 저장
-            with pd.ExcelWriter(self.file_path, engine='xlsxwriter', options={'strings_to_urls': False}) as writer:
+            with pd.ExcelWriter(self.file_path, engine='xlsxwriter', 
+                              engine_kwargs={'options': {'strings_to_urls': False}}) as writer:
                 df.to_excel(writer, index=False, sheet_name='Sheet1')
             
             self.logger.info(f"데이터 저장 완료: {len(data)}개 항목 → {self.file_path}")
