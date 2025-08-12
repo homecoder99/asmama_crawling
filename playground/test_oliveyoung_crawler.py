@@ -51,41 +51,51 @@ def read_category_filter_from_file(file_path: str) -> list:
         return []
 
 
-def create_storage(base_name: str, use_excel: bool = False):
+def create_storage(base_name: str, use_excel: bool = False, output_filename: str = None):
     """
     저장소를 생성한다.
     
     Args:
         base_name: 기본 파일명
         use_excel: Excel 저장소 사용 여부 (기본값: False, JSON 사용)
+        output_filename: 고정 출력 파일명 (지정시 타임스탬프 사용 안함)
         
     Returns:
         생성된 저장소 인스턴스
     """
-    from datetime import datetime
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if use_excel:
-        storage_path = f"data/{base_name}_{timestamp}.xlsx"
+    if output_filename:
+        # 고정 파일명 사용
+        storage_path = f"data/{output_filename}"
+    else:
+        # 기존 동적 파일명 사용
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if use_excel:
+            storage_path = f"data/{base_name}_{timestamp}.xlsx"
+        else:
+            storage_path = f"data/{base_name}_{timestamp}.json"
+    
+    if use_excel or (output_filename and output_filename.endswith('.xlsx')):
         return ExcelStorage(storage_path)
     else:
-        storage_path = f"data/{base_name}_{timestamp}.json"
         return JSONStorage(storage_path)
 
 
-async def test_single_product(goods_no: str, use_excel: bool = False):
+async def test_single_product(goods_no: str, use_excel: bool = False, output_filename: str = None):
     """
     단일 제품 크롤링 테스트.
     
     Args:
         goods_no: 테스트할 goodsNo
         use_excel: Excel 저장소 사용 여부
+        output_filename: 고정 출력 파일명
     """
     logger.info(f"Oliveyoung 단일 제품 테스트 시작: {goods_no}")
     storage_type = "Excel" if use_excel else "JSON"
     logger.info(f"저장소 타입: {storage_type}")
     
     # 저장소 생성
-    storage = create_storage(f"test_oliveyoung_{goods_no}", use_excel)
+    storage = create_storage(f"test_oliveyoung_{goods_no}", use_excel, output_filename)
     
     async with OliveyoungCrawler(storage=storage) as crawler:
         try:
@@ -213,7 +223,7 @@ async def test_category_extraction():
             logger.error(f"카테고리 추출 테스트 실행 중 오류: {str(e)}", exc_info=True)
 
 
-async def test_category_filtering(filter_file: str = None, filter_words: list = None, max_items_per_category: int = 5, use_excel: bool = False):
+async def test_category_filtering(filter_file: str = None, filter_words: list = None, max_items_per_category: int = 5, use_excel: bool = False, output_filename: str = None):
     """
     카테고리 필터링 기능 테스트.
     
@@ -247,7 +257,7 @@ async def test_category_filtering(filter_file: str = None, filter_words: list = 
     logger.info(f"저장소 타입: {storage_type}")
     
     # 저장소 생성
-    storage = create_storage(f"oliveyoung_products", use_excel)
+    storage = create_storage(f"oliveyoung_products", use_excel, output_filename)
     
     async with OliveyoungCrawler(storage=storage) as crawler:
         try:
@@ -483,6 +493,12 @@ def main():
         help="카테고리 필터링 단어 (공백으로 구분)",
         default=None
     )
+    parser.add_argument(
+        "--output-filename",
+        type=str,
+        help="고정 출력 파일명 (예: oliveyoung_products.xlsx)",
+        default=None
+    )
     
     args = parser.parse_args()
     
@@ -500,7 +516,8 @@ def main():
                 filter_file=args.filter_file,
                 filter_words=args.filter_words,
                 max_items_per_category=args.max_items,
-                use_excel=args.use_excel
+                use_excel=args.use_excel,
+                output_filename=args.output_filename
             ))
             
         elif args.full_flow:
