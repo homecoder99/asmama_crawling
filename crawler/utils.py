@@ -198,9 +198,10 @@ def extract_options_from_text(text: str) -> List[str]:
 def convert_country_to_code(country_name: str) -> str:
     """
     국가명을 2글자 국가 코드로 변환한다.
+    특수기호(■, ●, ◆ 등)를 제거하고 한글 텍스트만 추출하여 매핑한다.
     
     Args:
-        country_name: 국가명 (한국어/영어)
+        country_name: 국가명 (한국어/영어, 특수기호 포함 가능)
         
     Returns:
         2글자 국가 코드 (예: KR, US, CN) 또는 원본 텍스트 (매칭되지 않는 경우)
@@ -208,8 +209,15 @@ def convert_country_to_code(country_name: str) -> str:
     if not country_name:
         return ""
     
+    import re
+    
+    # 특수기호 제거 및 한글/영어 텍스트만 추출
+    # ■, ●, ◆, ▲, ★, ※ 등 특수기호와 공백을 제거
+    cleaned_country = re.sub(r'[^\w\s가-힣a-zA-Z]', '', country_name)
+    cleaned_country = cleaned_country.strip()
+    
     # 국가명을 소문자로 변환하여 매칭
-    country_lower = country_name.lower().strip()
+    country_lower = cleaned_country.lower().strip()
     
     # 국가명 -> 국가코드 매핑 사전
     country_name_to_code = {

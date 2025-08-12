@@ -39,5 +39,6 @@ uploader/output
 oy_state.json
 
 # Task files
-# tasks.json
-# tasks/ 
+playground/results
+data
+output

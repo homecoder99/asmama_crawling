@@ -7,7 +7,7 @@
 import re
 from typing import Dict, Any, List, Optional
 import logging
-from openai import OpenAI
+import openai
 import os
 import dotenv
 from data_loader import TemplateLoader
@@ -32,9 +32,10 @@ class FieldTransformer:
         self.logger = logging.getLogger(__name__)
         self.template_loader = template_loader
         
-        # OpenAI 클라이언트 초기화 (번역 및 카테고리 매핑용)
-        self.openai_client = OpenAI()
-        self.openai_client.api_key = os.getenv("OPENAI_API_KEY")
+        # OpenAI 클라이언트 초기화 (번역용)
+        self.openai_client = openai.OpenAI(
+            api_key=os.getenv("OPENAI_API_KEY")
+        )
         
         # 환율 (원 → 엔)
         self.krw_to_jpy_rate = 0.11  # 1원 = 0.11엔 (약 1100원 = 100엔)
@@ -297,7 +298,7 @@ class FieldTransformer:
     
     def _translate_to_japanese(self, text: str) -> str:
         """
-        텍스트를 일본어로 번역한다.
+        텍스트를 일본어로 번역한다 (OpenAI GPT-5 사용).
         
         Args:
             text: 번역할 텍스트
@@ -309,35 +310,28 @@ class FieldTransformer:
             return ""
         
         try:
-            self.logger.info(f"일본어 번역 시작: '{text[:50]}{'...' if len(text) > 50 else ''}'")
+            self.logger.info(f"일본어 번역 시작 (OpenAI GPT-5): '{text[:50]}{'...' if len(text) > 50 else ''}'")
             
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o",
-                temperature=0.3,
-                max_tokens=200,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": """당신은 한국어-일본어 번역 전문가입니다. 
-주어진 한국어 텍스트를 자연스러운 일본어로 번역해주세요.
-온라인 쇼핑몰 상품명과 설명에 적합한 표현을 사용하세요.
-반드시 번역 결과만 출력하고, 다른 설명이나 질문은 절대 하지 마세요.
-입력 텍스트가 비어있거나 이상해도 최대한 번역을 시도하세요."""
-                    },
-                    {
-                        "role": "user",
-                        "content": f"번역할 텍스트: \"{text}\""
-                    }
-                ]
+            response = self.openai_client.responses.create(
+                model="gpt-5",
+                input=f"""You are a professional Korean-to-Japanese translator specialized in e-commerce product translations. 
+Translate the given Korean text to natural Japanese suitable for online shopping product names and descriptions.
+Only output the Japanese translation, no explanations or additional text.
+Exclude promotional content like events, campaigns, and marketing terms.
+If the input is empty or unusual, still attempt translation and never use Korean text as-is.
+Use natural Japanese expressions suitable for product listings.
+
+번역할 텍스트: "{text}\""""
             )
             
-            translated = response.choices[0].message.content.strip()
-            self.logger.info(f"번역 완료: '{text}' → '{translated}'")
+            translated = response.output_text.strip()
+            self.logger.info(f"번역 완료 (OpenAI GPT-5): '{text}' → '{translated}'")
             return translated
             
         except Exception as e:
-            self.logger.error(f"번역 실패: {text} - {str(e)}")
+            self.logger.error(f"OpenAI GPT-5 번역 실패: {text} - {str(e)}")
             return text  # 실패 시 원문 반환
+    
     
     def get_transformation_summary(self, original_count: int, transformed_count: int) -> str:
         """

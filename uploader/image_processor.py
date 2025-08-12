@@ -1,6 +1,6 @@
 """이미지 전처리 및 품질 검사 시스템.
 
-OpenAI Vision API를 사용하여 이미지 품질을 분석하고
+Claude Vision API를 사용하여 이미지 품질을 분석하고
 대표 이미지를 선정하는 시스템을 구현한다.
 """
 
@@ -9,7 +9,7 @@ import json
 import textwrap
 from typing import Dict, Any
 import logging
-from openai import OpenAI
+import anthropic
 import dotenv
 import requests
 from PIL import Image
@@ -23,7 +23,7 @@ class ImageProcessor:
     """
     이미지 전처리 및 품질 검사 담당 클래스.
     
-    OpenAI Vision API를 사용하여 쿠팡 상품 이미지 규칙에 맞는
+    Claude Vision API를 사용하여 쿠팡 상품 이미지 규칙에 맞는
     이미지를 필터링하고 대표 이미지를 선정한다.
     """
     
@@ -33,7 +33,7 @@ class ImageProcessor:
         
         Args:
             filter_mode: 필터링 모드 ("ai", "advanced", "both")
-                - "ai": OpenAI Vision API만 사용
+                - "ai": Claude Vision API만 사용
                 - "advanced": 고급 로직 필터링만 사용
                 - "both": 두 방법 모두 사용 (기본값)
             site: 사이트 타입 ("asmama", "oliveyoung")
@@ -42,10 +42,11 @@ class ImageProcessor:
         self.filter_mode = filter_mode
         self.site = site
         
-        # OpenAI 클라이언트 (AI 모드일 때만 초기화)
+        # Claude 클라이언트 (AI 모드일 때만 초기화)
         if filter_mode in ["ai", "both"]:
-            self.client = OpenAI()
-            self.client.api_key = os.getenv("OPENAI_API_KEY")
+            self.client = anthropic.Anthropic(
+                api_key=os.getenv("ANTHROPIC_API_KEY")
+            )
         else:
             self.client = None
         
@@ -170,23 +171,23 @@ class ImageProcessor:
             규칙 검사 결과
         """
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                temperature=0,
+            response = self.client.messages.create(
+                model="claude-3-7-sonnet-20250219",
                 max_tokens=300,
+                temperature=0,
+                system=self.rules_prompt,
                 messages=[
-                    {"role": "system", "content": self.rules_prompt},
                     {
                         "role": "user",
                         "content": [
                             {"type": "text", "text": "Evaluate this image."},
-                            {"type": "image_url", "image_url": {"url": url}},
+                            {"type": "image", "source": {"type": "url", "url": url}},
                         ],
                     },
                 ],
             )
             
-            result_json = response.choices[0].message.content
+            result_json = response.content[0].text
             return json.loads(result_json)
 
         except (ValueError, json.JSONDecodeError) as e:
@@ -201,22 +202,22 @@ class ImageProcessor:
             
             # 재시도 1회
             try:
-                response = self.client.chat.completions.create(
-                    model="gpt-4o",
-                    temperature=0,
+                response = self.client.messages.create(
+                    model="claude-3-7-sonnet-20250219",
                     max_tokens=300,
+                    temperature=0,
+                    system=self.rules_prompt,
                     messages=[
-                        {"role": "system", "content": self.rules_prompt},
                         {
                             "role": "user", 
                             "content": [
                                 {"type": "text", "text": "Evaluate this image."},
-                                {"type": "image_url", "image_url": {"url": url}},
+                                {"type": "image", "source": {"type": "url", "url": url}},
                             ],
                         },
                     ],
                 )
-                result_json = response.choices[0].message.content
+                result_json = response.content[0].text
                 return json.loads(result_json)
             except Exception as retry_error:
                 self.logger.error(f"재시도 실패: {url} - {str(retry_error)}")
@@ -478,7 +479,7 @@ class ImageProcessor:
     
     def _filter_with_ai_only(self, url: str) -> Dict[str, Any]:
         """
-        OpenAI Vision API만 사용하여 필터링한다.
+        Claude Vision API만 사용하여 필터링한다.
         """
         try:
             rules_result = self.check_product_image(url)

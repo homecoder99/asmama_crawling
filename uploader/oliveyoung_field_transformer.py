@@ -9,7 +9,7 @@ import json
 import csv
 from typing import Dict, Any, List, Optional, Tuple
 import logging
-from openai import OpenAI
+import anthropic
 import os
 from pathlib import Path
 from datetime import datetime
@@ -429,27 +429,18 @@ class OliveyoungFieldTransformer(FieldTransformer):
         try:
             self.logger.info(f"영어 번역 시작: '{text}'")
             
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o",
-                temperature=0.2,
-                max_tokens=100,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": """당신은 한국어-영어 번역 전문가입니다. 
-주어진 한국어 브랜드명을 정확한 영어 브랜드명으로 번역해주세요.
-브랜드명은 고유명사이므로 정확한 공식 영어 표기를 사용해야 합니다.
-반드시 번역 결과만 출력하고, 다른 설명이나 질문은 절대 하지 마세요.
-입력 텍스트가 비어있거나 이상해도 최대한 번역을 시도하세요."""
-                    },
-                    {
-                        "role": "user",
-                        "content": f"브랜드명: \"{text}\""
-                    }
-                ]
+            response = self.openai_client.responses.create(
+                model="gpt-5",
+                input=f"""You are a professional Korean-to-English translator specializing in brand names. 
+Translate Korean brand names to their accurate official English representations. 
+Brand names are proper nouns, so use precise official English spellings. 
+Only output the translation result, no explanations or questions. 
+Even if the input text is empty or unusual, attempt translation as much as possible.
+
+브랜드명: "{text}\""""
             )
             
-            translated = response.choices[0].message.content.strip()
+            translated = response.output_text.strip()
             self.logger.info(f"영어 번역 완료: '{text}' → '{translated}'")
             return translated
             
@@ -474,35 +465,72 @@ class OliveyoungFieldTransformer(FieldTransformer):
         try:
             self.logger.info(f"상품명 정제 및 번역 시작: '{kor}' (브랜드: {brand})")
             
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o",
-                temperature=0.3,
-                max_tokens=200,
-                messages=[
-                    {
-                        "role": "system", 
-                        "content": (
-                            "You are a professional translator specialized in Korean-to-Japanese brand and product naming. "
-                            "First, remove any promotional content like '기획', '증정', '1+1', brand name, shop name, etc. from the product name. "
-                            "Then translate the cleaned product name to Japanese. "
-                            "Respond with the precise Japanese translation only—no explanations, notes, or extra text."
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": f"다음 한국 상품명에서 기획/증정/브랜드/샵이름 관련 내용을 제거하고 일본어로 번역해 주세요. 번역본만 출력하세요. 브랜드: {brand} 상품명: {kor}"
-                    }
-                ]
+            response = self.openai_client.responses.create(
+                model="gpt-5",
+                input=f"""You are a professional Korean-to-Japanese translator for e-commerce products. 
+CRITICAL: You MUST translate Korean text to Japanese ONLY. NEVER respond in Korean. 
+First, remove these promotional keywords from the product name: 
+기획, 증정, 이벤트, 한정판, 특가, 세트, 1+1, 2+1, 덤, 사은품, 무료, 할인, 
+출시, 런칭, 신제품, 리뉴얼, 업그레이드, 패키지, 기념, 컬렉션, 에디션, 
+올리브영, 단독, 독점, 먼저, 최초, 론칭, 브랜드명 등. 
+Then translate the cleaned product name to natural Japanese. 
+Respond with Japanese translation only—no Korean text allowed.
+
+제거할 브랜드: {brand}
+원본 상품명: {kor}
+
+위 상품명에서 홍보성 키워드와 브랜드명을 제거하고 일본어로만 번역해주세요. 한국어 사용 절대 금지."""
             )
             
-            translated = response.choices[0].message.content.strip()
+            translated = response.output_text.strip()
             self.logger.info(f"상품명 번역 완료: '{kor}' → '{translated}'")
             return translated
             
         except Exception as e:
             self.logger.error(f"상품명 번역 실패: {kor} (브랜드: {brand}) - {str(e)}")
-            # 실패 시 기본 일본어 번역으로 fallback
-            return self._translate_to_japanese(kor)
+            return kor  # 실패 시 원문 반환
+    
+    def _translate_option_value_to_japanese(self, option_value: str) -> str:
+        """
+        옵션 값을 일본어로 번역한다 (홍보성 키워드 필터링 포함).
+        
+        Args:
+            option_value: 번역할 옵션 값
+            
+        Returns:
+            번역된 일본어 옵션 값
+        """
+        if not option_value or not option_value.strip():
+            return ""
+        
+        try:
+            self.logger.info(f"옵션 값 번역 시작: '{option_value}'")
+            
+            response = self.openai_client.responses.create(
+                model="gpt-5",
+                input=f"""You are a professional Korean-to-Japanese translator for product options. 
+CRITICAL: You MUST translate Korean text to Japanese ONLY. NEVER respond in Korean. 
+Remove these promotional keywords before translation: 
+기획, 증정, 이벤트, 한정판, 특가, 세트, 1+1, 2+1, 덤, 사은품, 무료, 할인, 
+출시, 런칭, 신제품, 리뉴얼, 업그레이드, 패키지, 기념, 컬렉션, 에디션, 
+올리브영, 단독, 독점, 먼저, 최초, 론칭 등. 
+Only translate pure product attributes like colors, sizes, types. 
+If the text is purely promotional, return empty string. 
+Respond with Japanese translation only—no Korean text allowed.
+
+옵션 값: {option_value}
+
+위 옵션에서 홍보성 키워드를 제거하고, 순수한 제품 속성만 일본어로 번역해주세요. 홍보성 내용만 있다면 빈 문자열을 반환하세요. 한국어 사용 절대 금지."""
+            )
+            
+            translated = response.output_text.strip()
+            self.logger.info(f"옵션 값 번역 완료: '{option_value}' → '{translated}'")
+            return translated
+            
+        except Exception as e:
+            self.logger.error(f"옵션 값 번역 실패: {option_value} - {str(e)}")
+            # 실패 시 기본 번역 사용
+            return self._translate_to_japanese(option_value)
     
     def _get_end_date(self) -> str:
         """
@@ -532,7 +560,7 @@ class OliveyoungFieldTransformer(FieldTransformer):
             price_with_shipping = price + shipping_cost
             
             # 마진율 적용
-            margin_rate = 1.1
+            margin_rate = 1.0
             price_with_margin = int(price_with_shipping * margin_rate)
             
             # 엔화 환율 적용
@@ -648,8 +676,8 @@ class OliveyoungFieldTransformer(FieldTransformer):
                     # 옵션 타입 번역
                     option_type_jp = self._translate_field_name(option_type)
                     
-                    # 옵션 값 번역
-                    option_value_jp = self._translate_to_japanese(option_value)
+                    # 옵션 값 번역 (홍보성 키워드 필터링)
+                    option_value_jp = self._translate_option_value_to_japanese(option_value)
                     
                     # 옵션 가격 변환 (나누기 10만 적용, 마진율 및 환율 제외)
                     try:

@@ -7,7 +7,7 @@
 import re
 from typing import Dict, Any, List, Optional, Tuple
 import logging
-from openai import OpenAI
+import anthropic
 import os
 import dotenv
 from data_loader import TemplateLoader
@@ -33,9 +33,10 @@ class ProductFilter:
         self.logger = logging.getLogger(__name__)
         self.template_loader = template_loader
         
-        # OpenAI 클라이언트 초기화 (상품명 수정용)
-        self.openai_client = OpenAI()
-        self.openai_client.api_key = os.getenv("OPENAI_API_KEY")
+        # Claude 클라이언트 초기화 (상품명 수정용)
+        self.claude_client = anthropic.Anthropic(
+            api_key=os.getenv("ANTHROPIC_API_KEY")
+        )
         
         # 캐시
         self._warning_keywords_cache = None
@@ -160,7 +161,18 @@ class ProductFilter:
                 self.logger.warning(f"필수 필드 누락: {product_id} - {missing_field}")
                 continue
             
-            # 8. 경고 키워드 검증 및 AI 수정
+            # 8. 일본산 제품 필터링 (올리브영만)
+            if self._is_japanese_product(product):
+                stats["removal_reasons"]["japanese_product"] = stats["removal_reasons"].get("japanese_product", 0) + 1
+                stats["detailed_removals"].append({
+                    "product_id": product_id,
+                    "reason": "japanese_product",
+                    "details": product.get("origin_country", "")
+                })
+                self.logger.warning(f"일본산 제품 제거: {product_id} - {product.get('origin_country', '')}")
+                continue
+
+            # 9. 경고 키워드 검증 및 AI 수정
             warning_keyword = self._contains_warning_keyword(product)
             if warning_keyword:
                 self.logger.warning(f"경고 키워드 발견: {product_id} - {warning_keyword}")
@@ -228,6 +240,30 @@ class ProductFilter:
         
         return False
     
+    def _is_japanese_product(self, product: Dict[str, Any]) -> bool:
+        """
+        일본산 제품인지 확인한다 (올리브영 제품만).
+        
+        Args:
+            product: 상품 데이터
+            
+        Returns:
+            일본산 제품 여부
+        """
+        # Asmama 제품은 일본산 필터링 제외
+        if product.get("branduid"):
+            return False
+            
+        origin_country = product.get("origin_country", "").strip()
+        if not origin_country:
+            return False
+        
+        # JP 코드 또는 일본 관련 텍스트 확인
+        if origin_country.upper() == "JP":
+            return True
+        
+        return False
+    
     def _contains_warning_keyword(self, product: Dict[str, Any]) -> Optional[str]:
         """
         경고 키워드(의학, 광고성 문구)가 포함되어 있는지 확인한다.
@@ -270,14 +306,11 @@ class ProductFilter:
             original_name = product.get("item_name", "")
             category = product.get("category_name", "")
             
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                temperature=0.3,
+            response = self.claude_client.messages.create(
+                model="claude-3-7-sonnet-20250219",
                 max_tokens=100,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": """당신은 온라인 쇼핑몰 상품명 수정 전문가입니다. 
+                temperature=0.3,
+                system="""당신은 온라인 쇼핑몰 상품명 수정 전문가입니다. 
 경고 키워드(의학적 표현, 홍보성 광고 문구)가 포함된 상품명을 자연스럽게 수정해주세요.
 
 규칙:
@@ -285,8 +318,8 @@ class ProductFilter:
 2. 상품의 본질적 특성은 유지
 3. 자연스럽고 매력적인 표현 사용
 4. 한국어로 응답
-5. 상품명만 응답 (설명 없음)"""
-                    },
+5. 상품명만 응답 (설명 없음)""",
+                messages=[
                     {
                         "role": "user",
                         "content": f"""상품명: "{original_name}"
@@ -298,7 +331,7 @@ class ProductFilter:
                 ]
             )
             
-            modified_name = response.choices[0].message.content.strip()
+            modified_name = response.content[0].text.strip()
             
             # 수정된 상품 데이터 반환
             modified_product = product.copy()
@@ -468,6 +501,8 @@ class ProductFilter:
             summary.append(f"  카테고리 매핑 불가: {reasons['no_category_mapping']}개")
             summary.append(f"  브랜드 매핑 불가: {reasons['no_brand_mapping']}개")
             summary.append(f"  필수 필드 누락: {reasons['missing_required_fields']}개")
+            if "japanese_product" in reasons:
+                summary.append(f"  일본산 제품: {reasons['japanese_product']}개")
             summary.append("")
         
         # 수정 통계

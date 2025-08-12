@@ -140,7 +140,7 @@ class OliveyoungCrawler(BaseCrawler):
         self.page = await self.crawl_context.new_page()
         self.logger.info("세션 리프레시 완료")
     
-    async def ensure_list_page(self, category_id: str) -> bool:
+    async def ensure_list_page(self, category_id: str, rows_per_page: int = 400) -> bool:
         """
         카테고리 목록 페이지를 지속적으로 유지한다.
         
@@ -149,6 +149,7 @@ class OliveyoungCrawler(BaseCrawler):
         
         Args:
             category_id: 카테고리 ID
+            rows_per_page: 페이지당 표시할 아이템 수 (기본값: 400)
             
         Returns:
             페이지 준비 성공 여부
@@ -175,8 +176,8 @@ class OliveyoungCrawler(BaseCrawler):
                 # 새 카테고리 페이지 생성
                 self.list_page = await self.crawl_context.new_page()
                 
-                # 카테고리 URL 생성 및 이동
-                category_url = self.CATEGORY_URL_TEMPLATE.format(categoryId=category_id)
+                # 카테고리 URL 생성 및 이동 (rowsPerPage 파라미터 추가)
+                category_url = f"{self.CATEGORY_URL_TEMPLATE.format(categoryId=category_id)}&rowsPerPage={rows_per_page}"
                 
                 self.logger.info(f"카테고리 페이지 이동: {category_url}")
                 
@@ -708,7 +709,7 @@ class OliveyoungCrawler(BaseCrawler):
         """
         try:
             # 카테고리 목록 페이지 준비 (지속적으로 유지)
-            if not await self.ensure_list_page(category_id):
+            if not await self.ensure_list_page(category_id, max_items):
                 self.logger.error(f"카테고리 페이지 준비 실패: {category_id}")
                 return []
             
