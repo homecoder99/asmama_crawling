@@ -294,9 +294,39 @@ def convert_country_to_code(country_name: str) -> str:
 
         # 러시아
         "러시아": "RU",
-        "russia": "RU"
+        "russia": "RU",
+
+        # 벨기에
+        "벨기에": "BE",
+        "belgium": "BE",
+
+        # 스페인
+        "스페인": "ES",
+        "spain": "ES",
+
+        # 네덜란드
+        "네덜란드": "NL",
+        "netherlands": "NL",
+
+        # 노르웨이
+        "노르웨이": "NO",
+        "norway": "NO",
+
+        # 덴마크
+        "덴마크": "DK",
+        "denmark": "DK",
+
+        # 영국
+        "영국": "GB",
+        "uk": "GB",
+        "united kingdom": "GB",
+
+        # 이탈리아
+        "이탈리아": "IT",
+        "italy": "IT",
+
     }
-    
+     
     # 매핑 테이블에서 찾기
     country_code = country_name_to_code.get(country_lower, "")
     

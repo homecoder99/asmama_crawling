@@ -430,7 +430,7 @@ class OliveyoungFieldTransformer(FieldTransformer):
             self.logger.info(f"영어 번역 시작: '{text}'")
             
             response = self.openai_client.responses.create(
-                model="gpt-5",
+                model="gpt-5-mini",
                 input=f"""You are a professional Korean-to-English translator specializing in brand names. 
 Translate Korean brand names to their accurate official English representations. 
 Brand names are proper nouns, so use precise official English spellings. 
@@ -466,7 +466,7 @@ Even if the input text is empty or unusual, attempt translation as much as possi
             self.logger.info(f"상품명 정제 및 번역 시작: '{kor}' (브랜드: {brand})")
             
             response = self.openai_client.responses.create(
-                model="gpt-5",
+                model="gpt-5-mini",
                 input=f"""You are a professional Korean-to-Japanese translator for e-commerce products. 
 CRITICAL: You MUST translate Korean text to Japanese ONLY. NEVER respond in Korean. 
 First, remove these promotional keywords from the product name: 
@@ -507,7 +507,7 @@ Respond with Japanese translation only—no Korean text allowed.
             self.logger.info(f"옵션 값 번역 시작: '{option_value}'")
             
             response = self.openai_client.responses.create(
-                model="gpt-5",
+                model="gpt-5-mini",
                 input=f"""You are a professional Korean-to-Japanese translator for product options. 
 CRITICAL: You MUST translate Korean text to Japanese ONLY. NEVER respond in Korean. 
 Remove these promotional keywords before translation: 

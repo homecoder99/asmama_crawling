@@ -42,7 +42,7 @@ class FieldTransformer:
         
         # 배송비 및 마진 설정
         self.shipping_cost = 7500  # 배송비 7500원
-        self.margin_rate = 1.1  # 마진율 10%
+        self.margin_rate = 1.0
         
         # 카테고리 매핑 캐시
         self._category_mapping_cache = {}
@@ -313,7 +313,7 @@ class FieldTransformer:
             self.logger.info(f"일본어 번역 시작 (OpenAI GPT-5): '{text[:50]}{'...' if len(text) > 50 else ''}'")
             
             response = self.openai_client.responses.create(
-                model="gpt-5",
+                model="gpt-5-mini",
                 input=f"""You are a professional Korean-to-Japanese translator specialized in e-commerce product translations. 
 Translate the given Korean text to natural Japanese suitable for online shopping product names and descriptions.
 Only output the Japanese translation, no explanations or additional text.
