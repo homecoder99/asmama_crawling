@@ -241,7 +241,6 @@ class OliveyoungFieldTransformer(FieldTransformer):
         required_fields = {
             "seller_unique_item_id": "판매자 고유 상품 ID",
             "category_number": "카테고리 번호", 
-            "brand_number": "브랜드 번호",
             "item_name": "상품명",
             "price_yen": "판매가격"
         }
@@ -249,7 +248,8 @@ class OliveyoungFieldTransformer(FieldTransformer):
         # 중요 필드 정의 (None이면 경고하지만 제거하지 않음)
         important_fields = {
             "image_main_url": "메인 이미지 URL",
-            "item_description": "상품 설명"
+            "item_description": "상품 설명",
+            "brand_number": "브랜드 번호"
         }
         
         missing_fields = []
