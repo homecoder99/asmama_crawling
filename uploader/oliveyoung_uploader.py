@@ -139,6 +139,7 @@ class OliveyoungUploader:
             if input_path.suffix.lower() == '.xlsx':
                 # Excel 파일 로딩
                 df = pd.read_excel(input_path)
+
             elif input_path.suffix.lower() == '.json':
                 # JSON 파일 로딩
                 with open(input_path, 'r', encoding='utf-8') as f:
@@ -301,10 +302,7 @@ class OliveyoungUploader:
             for row in dataframe_to_rows(template_top_rows, index=False, header=False):
                 ws.append(row)
             
-            # 5) 헤더 행 추가 (Row 5)
-            ws.append(list(template_header))
-            
-            # 6) 상품 데이터 행들 추가 (Row 6부터)
+            # 6) 상품 데이터 행들 추가 (Row 5부터)
             for row in dataframe_to_rows(products_df, index=False, header=False):
                 ws.append(row)
             

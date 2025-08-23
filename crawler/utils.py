@@ -199,6 +199,7 @@ def convert_country_to_code(country_name: str) -> str:
     """
     국가명을 2글자 국가 코드로 변환한다.
     특수기호(■, ●, ◆ 등)를 제거하고 한글 텍스트만 추출하여 매핑한다.
+    복합 국가명과 특수 형태의 국가 표기에 대한 예외처리를 포함한다.
     
     Args:
         country_name: 국가명 (한국어/영어, 특수기호 포함 가능)
@@ -213,8 +214,31 @@ def convert_country_to_code(country_name: str) -> str:
     
     # 특수기호 제거 및 한글/영어 텍스트만 추출
     # ■, ●, ◆, ▲, ★, ※ 등 특수기호와 공백을 제거
-    cleaned_country = re.sub(r'[^\w\s가-힣a-zA-Z]', '', country_name)
+    cleaned_country = re.sub(r'[^\w\s가-힣a-zA-Z,/]', '', country_name)
     cleaned_country = cleaned_country.strip()
+    
+    # 복합 국가명 처리 - 첫 번째 국가를 우선으로 반환
+    if '/' in cleaned_country or ',' in cleaned_country:
+        # 구분자로 분리하여 첫 번째 국가 사용
+        separators = ['/', ',']
+        for sep in separators:
+            if sep in cleaned_country:
+                first_country = cleaned_country.split(sep)[0].strip()
+                # 재귀 호출로 첫 번째 국가만 처리
+                return convert_country_to_code(first_country)
+    
+    # 특수 형태의 국가 표기 처리
+    special_patterns = {
+        r'made\s+in\s+korea': 'KR',
+        r'국내산': 'KR',
+        r'중국\s*oem': 'CN',
+        r'제조국\s*:\s*중국': 'CN',
+    }
+    
+    country_lower_for_pattern = cleaned_country.lower()
+    for pattern, code in special_patterns.items():
+        if re.search(pattern, country_lower_for_pattern):
+            return code
     
     # 국가명을 소문자로 변환하여 매칭
     country_lower = cleaned_country.lower().strip()
@@ -324,6 +348,19 @@ def convert_country_to_code(country_name: str) -> str:
         # 이탈리아
         "이탈리아": "IT",
         "italy": "IT",
+        
+        # 뉴질랜드
+        "뉴질랜드": "NZ",
+        "new zealand": "NZ",
+        
+        # 폴란드
+        "폴란드": "PL",
+        "poland": "PL",
+        
+        # 체코
+        "체코": "CZ",
+        "czech": "CZ",
+        "czech republic": "CZ",
 
     }
      

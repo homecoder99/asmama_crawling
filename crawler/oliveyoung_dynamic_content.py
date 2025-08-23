@@ -171,25 +171,46 @@ class OliveyoungOptionExtractor:
                                 if option_name:
                                     # 품절 여부 확인
                                     is_soldout = await item.evaluate('el => el.classList.contains("soldout")')
-                                    status = "[품절]" if is_soldout else "[판매중]"
-                                    option_list.append(f"{status} {option_name}")
+                                    
+                                    # tx_num 클래스에서 옵션 가격 추출
+                                    price_element = item.locator('.tx_num')
+                                    option_price = 0
+                                    if await price_element.count() > 0:
+                                        price_text = clean_text(await price_element.inner_text())
+                                        # "27,600원" 형태에서 숫자만 추출
+                                        import re
+                                        price_match = re.search(r'([\d,]+)', price_text)
+                                        if price_match:
+                                            option_price = int(price_match.group(1).replace(',', ''))
+                                    
+                                    option_list.append({
+                                        "name": option_name,
+                                        "price": option_price,
+                                        "is_soldout": is_soldout
+                                    })
                         
                         if option_list:
                             # 새로운 옵션 형식: 옵션명||*옵션값||*옵션가격||*재고수량||*판매자옵션코드$$
                             formatted_options = []
+                            base_price = product_data.get("price", 0)
+                            
                             for idx, option in enumerate(option_list):
-                                # 기존 "[판매중] 옵션명" 또는 "[품절] 옵션명" 형식 파싱
-                                is_soldout = "[품절]" in option
-                                option_name = option.replace("[품절]", "").replace("[판매중]", "").strip()
+                                option_name = option["name"]
+                                option_price = option["price"]
+                                is_soldout = option["is_soldout"]
+                                
+                                # 추가 가격 계산 (옵션 가격 - 기본 판매가)
+                                additional_price = option_price - base_price if option_price > 0 else 0
+                                
                                 stock_qty = "0" if is_soldout else "200"  # 품절시 0, 판매중시 200
                                 unique_item_id = product_data['unique_item_id']
                                 
                                 # 옵션명||*옵션값||*옵션가격||*재고수량||*판매자옵션코드$$
-                                formatted_option = f"Option{idx+1}||*{option_name}||*0||*{stock_qty}||*{unique_item_id}_{idx+1}$$"
+                                formatted_option = f"Option{idx+1}||*{option_name}||*{additional_price}||*{stock_qty}||*{unique_item_id}_{idx+1}$$"
                                 formatted_options.append(formatted_option)
                             
                             product_data["option_info"] = "".join(formatted_options)  # $$ 구분자로 이미 연결됨
-                            self.logger.debug(f"옵션 정보 추출 완료: {len(option_list)}개")
+                            self.logger.debug(f"옵션 정보 추출 완료: {len(option_list)}개 (가격 추출 포함)")
                         
                 except PlaywrightTimeoutError:
                     self.logger.debug("옵션 DOM 로딩 타임아웃")

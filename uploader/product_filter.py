@@ -360,6 +360,7 @@ class ProductFilter:
             self._registered_branduids_cache = self.template_loader.get_registered_unique_item_ids()
         
         unique_item_id = str(product.get("unique_item_id", "")).strip()
+        print(unique_item_id[0])
         if not unique_item_id:
             return False
         
