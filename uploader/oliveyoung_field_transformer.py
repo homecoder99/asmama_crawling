@@ -16,6 +16,7 @@ from datetime import datetime
 import dotenv
 from data_loader import TemplateLoader
 from field_transformer import FieldTransformer
+from brand_translation_manager import BrandTranslationManager
 
 # 환경변수 로드
 dotenv.load_dotenv()
@@ -48,6 +49,9 @@ class OliveyoungFieldTransformer(FieldTransformer):
         
         # 올리브영-Qoo10 카테고리 매핑 로드
         self._olive_qoo_mapping = self._load_olive_qoo_mapping()
+        
+        # 브랜드 번역 관리자 초기화
+        self.brand_manager = BrandTranslationManager()
         
         # 브랜드 매칭 실패 로그용 CSV 파일 경로
         self.failed_brands_csv = Path("output") / f"failed_brands_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -310,8 +314,6 @@ class OliveyoungFieldTransformer(FieldTransformer):
             elif not isinstance(category_detail_id, str):
                 category_detail_id = str(category_detail_id)
             
-            self.logger.info(f"카테고리 매핑 시도: '{category_detail_id}'")
-            
             # 매핑 딕셔너리가 비어있는지 확인
             if not self._olive_qoo_mapping:
                 self.logger.warning("올리브영-Qoo10 매핑 딕셔너리가 비어있음")
@@ -350,10 +352,10 @@ class OliveyoungFieldTransformer(FieldTransformer):
                 self.logger.info(f"브랜드 직접 매칭 성공: {brand_name} → {brand_number}")
                 return brand_number
             
-            # 2순위: 영어로 번역해서 검색
+            # 2순위: 영어로 번역해서 검색 (파일 캐시 사용)
             english_brand = ""
             try:
-                english_brand = self._translate_to_english(brand_name)
+                english_brand = self.brand_manager.get_brand_translation(brand_name, "english")
                 if english_brand and english_brand.strip():
                     # 번역된 브랜드명 정규화 후 매칭
                     english_brand = english_brand.strip()
@@ -364,10 +366,10 @@ class OliveyoungFieldTransformer(FieldTransformer):
             except Exception as e:
                 self.logger.info(f"브랜드 영어 번역 실패: {brand_name} - {str(e)}")
             
-            # 3순위: 일본어로 번역해서 검색
+            # 3순위: 일본어로 번역해서 검색 (파일 캐시 사용)
             japanese_brand = ""
             try:
-                japanese_brand = self._translate_to_japanese(brand_name)
+                japanese_brand = self.brand_manager.get_brand_translation(brand_name, "japanese")
                 if japanese_brand and japanese_brand.strip():
                     # 번역된 브랜드명 정규화 후 매칭
                     japanese_brand = japanese_brand.strip()
@@ -413,40 +415,6 @@ class OliveyoungFieldTransformer(FieldTransformer):
         except Exception as e:
             self.logger.error(f"브랜드 실패 CSV 저장 실패: {str(e)}")
     
-    def _translate_to_english(self, text: str) -> str:
-        """
-        텍스트를 영어로 번역한다.
-        
-        Args:
-            text: 번역할 텍스트
-            
-        Returns:
-            번역된 영어 텍스트
-        """
-        if not text or not text.strip():
-            return ""
-        
-        try:
-            self.logger.info(f"영어 번역 시작: '{text}'")
-            
-            response = self.openai_client.responses.create(
-                model="gpt-5-mini",
-                input=f"""You are a professional Korean-to-English translator specializing in brand names. 
-Translate Korean brand names to their accurate official English representations. 
-Brand names are proper nouns, so use precise official English spellings. 
-Only output the translation result, no explanations or questions. 
-Even if the input text is empty or unusual, attempt translation as much as possible.
-
-브랜드명: "{text}\""""
-            )
-            
-            translated = response.output_text.strip()
-            self.logger.info(f"영어 번역 완료: '{text}' → '{translated}'")
-            return translated
-            
-        except Exception as e:
-            self.logger.error(f"영어 번역 실패: {text} - {str(e)}")
-            return text  # 실패 시 원문 반환
     
     def _create_product_name_kor_to_jp(self, kor: str, brand: str) -> str:
         """
@@ -520,7 +488,7 @@ Respond with Japanese translation only—no Korean text allowed.
 
 옵션 값: {option_value}
 
-위 옵션에서 홍보성 키워드를 제거하고, 순수한 제품 속성만 일본어로 번역해주세요. 홍보성 내용만 있다면 빈 문자열을 반환하세요. 한국어 사용 절대 금지."""
+위 옵션에서 홍보성 키워드를 제거하고, 순수한 제품 속성만 일본어로 번역해주세요. 한국어 사용 절대 금지."""
             )
             
             translated = response.output_text.strip()

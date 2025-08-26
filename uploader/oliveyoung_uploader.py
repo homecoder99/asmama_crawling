@@ -96,7 +96,7 @@ class OliveyoungUploader:
             
             self.stats["total_input_products"] = len(products)
             self.logger.info(f"Oliveyoung 입력 데이터 로딩 완료: {len(products)}개 상품")
-            
+ 
             # 2. 이미지 품질 검사 및 대표 이미지 선정
             image_processed_products = self._process_images(products)
             self.stats["image_processed_products"] = len(image_processed_products)
@@ -104,7 +104,7 @@ class OliveyoungUploader:
             # 3. 상품 필터링
             filtered_products, filter_stats = self.product_filter.filter_products(image_processed_products)
             self.stats["filtered_products"] = len(filtered_products)
-            
+
             # 4. 필드 변환
             transformed_products = self.field_transformer.transform_products(filtered_products)
             self.stats["transformed_products"] = len(transformed_products)
@@ -137,8 +137,8 @@ class OliveyoungUploader:
             input_path = Path(input_file)
             
             if input_path.suffix.lower() == '.xlsx':
-                # Excel 파일 로딩
-                df = pd.read_excel(input_path)
+                # Excel 파일 로딩 - category_detail_id를 문자열로 강제 변환하여 정밀도 손실 방지
+                df = pd.read_excel(input_path, dtype={'category_detail_id': str})
 
             elif input_path.suffix.lower() == '.json':
                 # JSON 파일 로딩
