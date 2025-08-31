@@ -482,13 +482,14 @@ Remove these promotional keywords before translation:
 기획, 증정, 이벤트, 한정판, 특가, 세트, 1+1, 2+1, 덤, 사은품, 무료, 할인, 
 출시, 런칭, 신제품, 리뉴얼, 업그레이드, 패키지, 기념, 컬렉션, 에디션, 
 올리브영, 단독, 독점, 먼저, 최초, 론칭 등. 
+Also remove price information (XX,XXX원, XX,XXX 원, any numbers followed by 원).
 Only translate pure product attributes like colors, sizes, types. 
-If the text is purely promotional, return empty string. 
+If the text is purely promotional or contains only price information, return empty string. 
 Respond with Japanese translation only—no Korean text allowed.
 
 옵션 값: {option_value}
 
-위 옵션에서 홍보성 키워드를 제거하고, 순수한 제품 속성만 일본어로 번역해주세요. 한국어 사용 절대 금지."""
+위 옵션에서 홍보성 키워드와 가격 정보(XX,XXX원)를 완전히 제거하고, 순수한 제품 속성만 일본어로 번역해주세요. 한국어 사용 절대 금지."""
             )
             
             translated = response.output_text.strip()
