@@ -361,6 +361,31 @@ def convert_country_to_code(country_name: str) -> str:
         "체코": "CZ",
         "czech": "CZ",
         "czech republic": "CZ",
+        
+        # 멕시코
+        "멕시코": "MX",
+        "mexico": "MX",
+        
+        # 스위스
+        "스위스": "CH",
+        "switzerland": "CH",
+        
+        # 태국
+        "태국": "TH",
+        "thailand": "TH",
+        
+        # 이스라엘
+        "이스라엘": "IL",
+        "israel": "IL",
+        
+        # 터키
+        "터키": "TR",
+        "turkey": "TR",
+        
+        # 남아프리카공화국
+        "남아프리카공화국": "ZA",
+        "남아프리카": "ZA",
+        "south africa": "ZA",
 
     }
      
