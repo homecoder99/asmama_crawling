@@ -419,7 +419,7 @@ class OliveyoungFieldTransformer(FieldTransformer):
     def _create_product_name_kor_to_jp(self, kor: str, brand: str) -> str:
         """
         한국어 상품명에서 기획/증정 관련 내용을 제거하고 일본어로 번역하는 함수
-        
+
         Args:
             kor: 번역할 한국어 상품명
             brand: 브랜드명 (제거 대상)
@@ -429,31 +429,46 @@ class OliveyoungFieldTransformer(FieldTransformer):
         """
         if not kor or not kor.strip():
             return ""
-        
+
         try:
             self.logger.info(f"상품명 정제 및 번역 시작: '{kor}' (브랜드: {brand})")
-            
+
             response = self.openai_client.responses.create(
                 model="gpt-5-mini",
-                input=f"""You are a professional Korean-to-Japanese translator for e-commerce products. 
-CRITICAL: You MUST translate Korean text to Japanese ONLY. NEVER respond in Korean. 
-First, remove these promotional keywords from the product name: 
-기획, 증정, 이벤트, 한정판, 특가, 세트, 1+1, 2+1, 덤, 사은품, 무료, 할인, 
-출시, 런칭, 신제품, 리뉴얼, 업그레이드, 패키지, 기념, 컬렉션, 에디션, 
-올리브영, 단독, 독점, 먼저, 최초, 론칭, 브랜드명 등. 
-Then translate the cleaned product name to natural Japanese. 
-Respond with Japanese translation only—no Korean text allowed.
+                input=f"""You are a KO→JA e-commerce product-title localizer.
 
-제거할 브랜드: {brand}
-원본 상품명: {kor}
+## GOAL
+Translate the Korean product name into natural Japanese **product name only**.
+- Delete brand names and any promotional or packaging info.
+- Output **Japanese only**, a single line, no quotes/brackets/extra words.
 
-위 상품명에서 홍보성 키워드와 브랜드명을 제거하고 일본어로만 번역해주세요. 한국어 사용 절대 금지."""
+## REMOVE (ALWAYS)
+1) Brand: remove every appearance of the given brand (and its Japanese/English forms if present).
+2) Bracketed segments: delete text inside any of these and the brackets themselves:
+   [], ［］, (), （）, {{}}, 「」, 『』, 【】, 〈〉, 《》, <>.
+   - If a bracket contains only essential spec like capacity/size/shade (e.g., 50mL, 01, 1.5), keep the info **without brackets**.
+3) Promo words (KO): 기획, 증정, 이벤트, 한정, 한정판, 특가, 세트, 1+1, 2+1, 덤, 사은품, 무료, 할인,
+   출시, 런칭, 론칭, 신제품, 리뉴얼, 업그레이드, 패키지, 기념, 컬렉션, 에디션, 올리브영,
+   단독, 독점, 먼저, 최초, 브랜드명, 픽, 추천, 콜라보, 선택, 단품, 더블, 증량.
+
+## STYLE
+- Noun phrase only, no sentence form. No emojis, no decorative symbols.
+- Do **not** invent information. If unsure, omit.
+
+## OUTPUT
+Return **one line** with the final Japanese product name.
+Do not include explanations, quotes, or any non-Japanese text.
+
+--------------------------------
+BRAND (to remove): {brand}
+KOREAN_NAME: {kor}
+"""
             )
-            
+
             translated = response.output_text.strip()
             self.logger.info(f"상품명 번역 완료: '{kor}' → '{translated}'")
             return translated
-            
+
         except Exception as e:
             self.logger.error(f"상품명 번역 실패: {kor} (브랜드: {brand}) - {str(e)}")
             return kor  # 실패 시 원문 반환
@@ -476,20 +491,50 @@ Respond with Japanese translation only—no Korean text allowed.
             
             response = self.openai_client.responses.create(
                 model="gpt-5-mini",
-                input=f"""You are a professional Korean-to-Japanese translator for product options. 
-CRITICAL: You MUST translate Korean text to Japanese ONLY. NEVER respond in Korean. 
-Remove these promotional keywords before translation: 
-기획, 증정, 이벤트, 한정판, 특가, 세트, 1+1, 2+1, 덤, 사은품, 무료, 할인, 
-출시, 런칭, 신제품, 리뉴얼, 업그레이드, 패키지, 기념, 컬렉션, 에디션, 
-올리브영, 단독, 독점, 먼저, 최초, 론칭 등. 
-Also remove price information (XX,XXX원, XX,XXX 원, any numbers followed by 원).
-Only translate pure product attributes like colors, sizes, types. 
-If the text is purely promotional or contains only price information, return empty string. 
-Respond with Japanese translation only—no Korean text allowed.
+                input=f"""You are a KO→JA e-commerce option translator.
 
-옵션 값: {option_value}
+## GOAL
+Translate the option text into a clean **Japanese option name only** (single line).
+- Output **Japanese only** (no Korean). Use katakana for names if needed.
+- **Never include price** (e.g., 16,720원).
+- If the option indicates **sold out** (e.g., 품절/일시품절/재고없음/매진/완판/out of stock), **return an empty string** (to exclude it).
 
-위 옵션에서 홍보성 키워드와 가격 정보(XX,XXX원)를 완전히 제거하고, 순수한 제품 속성만 일본어로 번역해주세요. 한국어 사용 절대 금지."""
+## WHAT TO KEEP (for option segmentation)
+Keep information that defines the option itself:
+- **Sale form**: 단품, 세트, ×N개 / N개 세트 / 2개 세트 / 본체+리필 / 50mL+30mL
+- **Capacity/size/count**: 120mL, 12g, 3매, 2개, 01/02/003 (숫자 단위와 mL/g/매/개）
+- **Type/color/shade/model names**: 00 클리어, 03 로지, 센시비오 H2O 850mL K2
+- **Promo that defines composition only** (option-defining): 1+1, 2+1, 증량 +10mL（내용이 구성요소와 명확한 경우）
+Do NOT keep marketing claims (인기/No.1/한정기념 등).
+
+## WHAT TO REMOVE
+- Store codes / metadata: strings like `Option1||*`, `||*0||*200||*...`, `oliveyoung_A...`, SKU/ID hashes
+- Bracketed non-structural claims: [ ], ［ ］, ( ), （ ）, 【 】, 〈 〉, 《 》, 「 」, 『 』 **장식문구**。
+  ※ 다만、용량 또는 성분（50mL+30mL、본체+리필）**실제 구성**은 남깁니다（괄호는 제거하고 내용만 남깁니다）。
+- Any currency or price-like tokens（44,100원, 36,550KRW）
+
+## NORMALIZATION
+- Half-width numbers; units as **mL/g**; use **×** for multiplicative counts; use **+** for bundles: `30mL+30mL`, `7mL×3`
+- Convert Hangul words to standard JP EC terms: 단품→単品 / 세트→セット / 증정→おまけ / 추가→追加 / 리필→リフィル
+- Keep original attribute order **when reasonable**, but ensure readability (spaces between tokens).
+
+## OUTPUT
+Return **only** the final Japanese option string on one line.
+No explanations, no quotes, no brackets unless part of model numbers (e.g., "01" without brackets).
+If the option is sold out or becomes empty after removing prices/metadata, **return an empty string**.
+
+--------------------------------
+OPTION_INPUT: {option_value}
+
+# Examples
+- IN: `Option2||*03 로지 16,720원` → OUT: `03 ロージー`
+- IN: `（품절）센시비오 H2O 850ml K2` → OUT: ``  (empty string)
+- IN: `단품 200ml` → OUT: `単品 200mL`
+- IN: `30ml+30ml` → OUT: `30mL+30mL`
+- IN: `크림 50mL 단품` → OUT: `クリーム 50mL 単品`
+- IN: `1+1 50ml` → OUT: `1+1 50mL`
+- IN: `본체+리필 12g` → OUT: `本体+リフィル 12g`
+"""
             )
             
             translated = response.output_text.strip()
