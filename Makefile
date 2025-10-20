@@ -41,6 +41,22 @@ oliveyoung-crawl: ## Oliveyoung 크롤링을 실행합니다 (MAX_ITEMS=1, OUTPU
 	echo "Oliveyoung 크롤링 시작: $$MAX_ITEMS개 상품, 출력파일: $$OUTPUT_FILENAME"; \
 	uv run playground/test_oliveyoung_crawler.py --test-filter --use-excel --max-items=$$MAX_ITEMS --output-filename=$$OUTPUT_FILENAME
 
+oliveyoung-crawl-new: ## Oliveyoung 최신 상품만 크롤링합니다 (EXISTING_EXCEL, MAX_ITEMS, OUTPUT_FILENAME 조절 가능)
+	@if [ -z "$(EXISTING_EXCEL)" ]; then \
+		EXISTING_EXCEL="data/oliveyoung_20250929.xlsx"; \
+	fi; \
+	if [ -z "$(MAX_ITEMS)" ]; then \
+		MAX_ITEMS=15; \
+	fi; \
+	if [ -z "$(OUTPUT_FILENAME)" ]; then \
+		OUTPUT_FILENAME="oliveyoung_new_products.xlsx"; \
+	fi; \
+	echo "Oliveyoung 최신 상품 크롤링 시작"; \
+	echo "  - 기존 데이터: $$EXISTING_EXCEL"; \
+	echo "  - 카테고리당 최대: $$MAX_ITEMS개"; \
+	echo "  - 출력 파일: $$OUTPUT_FILENAME"; \
+	uv run playground/test_oliveyoung_crawler.py --test-new-products --existing-excel=$$EXISTING_EXCEL --max-items=$$MAX_ITEMS --use-excel --output-filename=$$OUTPUT_FILENAME
+
 oliveyoung-upload: ## Oliveyoung 크롤링 데이터를 Qoo10 업로드 형식으로 변환합니다
 	@if [ -z "$(INPUT_FILE)" ]; then \
 		echo "사용법: make oliveyoung-upload INPUT_FILE=data/oliveyoung_products_20250807_103114.xlsx"; \

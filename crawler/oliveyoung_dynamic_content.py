@@ -193,24 +193,36 @@ class OliveyoungOptionExtractor:
                             # 새로운 옵션 형식: 옵션명||*옵션값||*옵션가격||*재고수량||*판매자옵션코드$$
                             formatted_options = []
                             base_price = product_data.get("price", 0)
-                            
-                            for idx, option in enumerate(option_list):
-                                option_name = option["name"]
-                                option_price = option["price"]
-                                is_soldout = option["is_soldout"]
-                                
-                                # 추가 가격 계산 (옵션 가격 - 기본 판매가)
-                                additional_price = option_price - base_price if option_price > 0 else 0
-                                
-                                stock_qty = "0" if is_soldout else "200"  # 품절시 0, 판매중시 200
-                                unique_item_id = product_data['unique_item_id']
-                                
-                                # 옵션명||*옵션값||*옵션가격||*재고수량||*판매자옵션코드$$
-                                formatted_option = f"Option{idx+1}||*{option_name}||*{additional_price}||*{stock_qty}||*{unique_item_id}_{idx+1}$$"
-                                formatted_options.append(formatted_option)
-                            
-                            product_data["option_info"] = "".join(formatted_options)  # $$ 구분자로 이미 연결됨
-                            self.logger.debug(f"옵션 정보 추출 완료: {len(option_list)}개 (가격 추출 포함)")
+
+                            # 1단계: 옵션 개수에 따라 단일/옵션 상품 결정
+                            if len(option_list) == 1:
+                                product_data["is_option_available"] = False
+                                self.logger.info(f"옵션 1개만 존재: 단일 상품으로 변경")
+                            else:
+                                # 2단계: 가격 검증 - 이상한 가격의 옵션은 품절 처리
+                                for idx, option in enumerate(option_list):
+                                    option_name = option["name"]
+                                    option_price = option["price"]
+                                    is_soldout = option["is_soldout"]
+
+                                    # 추가 가격 계산 (옵션 가격 - 기본 판매가)
+                                    additional_price = option_price - base_price
+
+                                    # 가격 검증: ±50% 초과 시 삭제
+                                    if additional_price < -(base_price * 0.5) or additional_price > base_price * 0.5:
+                                        self.logger.warning(f"옵션 가격이 상품 가격 ±50% 초과: {option_name} (추가금액: {additional_price}) - 상품에서 제외")
+                                        continue
+                                    else:
+                                        stock_qty = "0" if is_soldout else "200"  # 품절 상태 반영
+
+                                    unique_item_id = product_data['unique_item_id']
+
+                                    # 3단계: 옵션 포맷팅 (모든 옵션 포함, 이상 가격은 삭제)
+                                    formatted_option = f"Option||*{option_name}||*{additional_price}||*{stock_qty}||*{unique_item_id}_{idx+1}$$"
+                                    formatted_options.append(formatted_option)
+
+                                product_data["option_info"] = "".join(formatted_options)  # $$ 구분자로 이미 연결됨
+                                self.logger.debug(f"옵션 정보 추출 완료: {len(option_list)}개 (가격 검증 포함)")
                         
                 except PlaywrightTimeoutError:
                     self.logger.debug("옵션 DOM 로딩 타임아웃")

@@ -325,10 +325,74 @@ async def test_category_filtering(filter_file: str = None, filter_words: list = 
             logger.error(f"카테고리 필터링 테스트 실행 중 오류: {str(e)}", exc_info=True)
 
 
+async def test_new_products_only(existing_excel: str, max_items_per_category: int = 15, use_excel: bool = True, output_filename: str = None):
+    """
+    최신 상품만 크롤링 테스트 (기존 엑셀과 비교).
+
+    Args:
+        existing_excel: 기존 크롤링 결과 엑셀 파일 경로
+        max_items_per_category: 카테고리당 최대 크롤링 개수
+        use_excel: Excel 저장소 사용 여부
+        output_filename: 출력 파일명
+    """
+    logger.info("=== Oliveyoung 최신 상품 크롤링 테스트 시작 ===")
+    logger.info(f"기존 데이터: {existing_excel}")
+    logger.info(f"카테고리당 최대 아이템: {max_items_per_category}")
+
+    # 기존 파일 존재 확인
+    if not Path(existing_excel).exists():
+        logger.error(f"기존 엑셀 파일을 찾을 수 없습니다: {existing_excel}")
+        return
+
+    # 저장소 생성
+    storage = create_storage("oliveyoung_new_products", use_excel, output_filename)
+
+    async with OliveyoungCrawler(storage=storage) as crawler:
+        try:
+            # 최신 상품만 크롤링
+            new_products = await crawler.crawl_new_products_only(
+                existing_excel_path=existing_excel,
+                max_items_per_category=max_items_per_category,
+                category_filter=None  # 모든 카테고리
+            )
+
+            # 결과 정리
+            logger.info("=== Oliveyoung 최신 상품 크롤링 완료 ===")
+            logger.info(f"총 신규 제품: {len(new_products)}개")
+
+            if new_products:
+                # 카테고리별 통계
+                category_stats = {}
+                for product in new_products:
+                    category = product.get('category_name', '미분류')
+                    category_stats[category] = category_stats.get(category, 0) + 1
+
+                logger.info("\n카테고리별 신규 상품:")
+                for category, count in sorted(category_stats.items()):
+                    logger.info(f"  - {category}: {count}개")
+
+                # 샘플 상품 출력
+                logger.info("\n신규 상품 샘플 (최대 5개):")
+                for i, product in enumerate(new_products[:5], 1):
+                    logger.info(f"  {i}. {product.get('item_name', 'N/A')}")
+                    logger.info(f"     - goods_no: {product.get('goods_no', 'N/A')}")
+                    logger.info(f"     - 브랜드: {product.get('brand_name', 'N/A')}")
+                    logger.info(f"     - 가격: {product.get('price', 'N/A')}원")
+
+                # 결과 저장
+                storage.save(new_products)
+                logger.info(f"\n결과 저장 완료: {storage.file_path}")
+            else:
+                logger.info("신규 상품이 없습니다.")
+
+        except Exception as e:
+            logger.error(f"최신 상품 크롤링 테스트 실행 중 오류: {str(e)}", exc_info=True)
+
+
 async def test_full_crawling_flow(max_items_per_category: int = 2, category_filter_length: int = None, use_excel: bool = False):
     """
     전체 크롤링 플로우 테스트: 카테고리 추출 → 상품 ID 추출 → 상품 데이터 크롤링.
-    
+
     Args:
         max_items_per_category: 카테고리당 최대 크롤링 개수
         category_filter_length: 카테고리 ID 길이 필터 (None이면 모든 길이)
@@ -499,17 +563,42 @@ def main():
         help="고정 출력 파일명 (예: oliveyoung_products.xlsx)",
         default=None
     )
-    
+    parser.add_argument(
+        "--test-new-products",
+        action="store_true",
+        help="최신 상품만 크롤링 테스트 (--existing-excel 필수)"
+    )
+    parser.add_argument(
+        "--existing-excel",
+        type=str,
+        help="기존 크롤링 결과 엑셀 파일 경로 (최신 상품 크롤링 시 사용)",
+        default="data/oliveyoung_20250929.xlsx"
+    )
+
     args = parser.parse_args()
     
     # 출력 디렉토리 생성
     Path("data").mkdir(exist_ok=True)
     
     try:
-        if args.test_categories:
+        if args.test_new_products:
+            # 최신 상품만 크롤링 테스트
+            if not Path(args.existing_excel).exists():
+                logger.error(f"기존 엑셀 파일을 찾을 수 없습니다: {args.existing_excel}")
+                logger.error("--existing-excel 옵션으로 올바른 파일 경로를 지정하세요.")
+                return
+
+            asyncio.run(test_new_products_only(
+                existing_excel=args.existing_excel,
+                max_items_per_category=args.max_items,
+                use_excel=args.use_excel,
+                output_filename=args.output_filename
+            ))
+
+        elif args.test_categories:
             # 카테고리 ID 추출 테스트 (저장소 불필요)
             asyncio.run(test_category_extraction())
-            
+
         elif args.test_filter:
             # 카테고리 필터링 기능 테스트
             asyncio.run(test_category_filtering(

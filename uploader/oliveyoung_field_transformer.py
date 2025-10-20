@@ -696,7 +696,7 @@ OPTION_INPUT: {option_value}
                     # 옵션 가격 변환 (나누기 10만 적용, 마진율 및 환율 제외)
                     try:
                         price_krw = int(option_price) if option_price.isdigit() else 0
-                        price_jpy = int(price_krw / 10)
+                        price_jpy = int(price_krw * 0.11)
                         option_price_jpy = str(price_jpy)
                     except (ValueError, TypeError):
                         option_price_jpy = "0"

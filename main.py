@@ -86,6 +86,18 @@ def main():
         default=15
     )
     parser.add_argument(
+        "--new-products-only",
+        action="store_true",
+        help="Oliveyoung 최신 상품만 크롤링 (기존 엑셀 파일과 비교)",
+        default=False
+    )
+    parser.add_argument(
+        "--existing-excel",
+        type=str,
+        help="기존 크롤링 결과 엑셀 파일 경로 (--new-products-only와 함께 사용)",
+        default=None
+    )
+    parser.add_argument(
         "--output",
         help="출력 Excel 파일 경로",
         default=None
@@ -103,15 +115,20 @@ def main():
         # Oliveyoung 옵션 검증
         options_count = sum([
             bool(args.goods_no),
-            bool(args.list_url), 
+            bool(args.list_url),
             bool(args.category_id),
-            args.all_categories
+            args.all_categories,
+            args.new_products_only
         ])
-        
+
         if options_count == 0:
-            parser.error("Oliveyoung: --goods-no, --list-url, --category-id, 또는 --all-categories 중 하나는 필수입니다.")
+            parser.error("Oliveyoung: --goods-no, --list-url, --category-id, --all-categories, 또는 --new-products-only 중 하나는 필수입니다.")
         if options_count > 1:
             parser.error("Oliveyoung: 여러 옵션을 동시에 사용할 수 없습니다.")
+
+        # --new-products-only 사용 시 --existing-excel 필수
+        if args.new_products_only and not args.existing_excel:
+            parser.error("Oliveyoung: --new-products-only 옵션 사용 시 --existing-excel은 필수입니다.")
     
     # 기본 출력 파일 경로 설정
     if args.output is None:
@@ -185,14 +202,27 @@ def main():
                 
             elif args.all_categories:
                 logger.info(f"Oliveyoung 모든 카테고리 크롤링 (카테고리당 최대 {args.max_items_per_category}개)")
-                
+
                 async def run_oliveyoung_all_categories():
                     async with crawler:
                         return await crawler.crawl_all_categories(args.max_items_per_category)
-                
+
                 import asyncio
                 products = asyncio.run(run_oliveyoung_all_categories())
-                
+
+            elif args.new_products_only:
+                logger.info(f"Oliveyoung 최신 상품만 크롤링 (기존: {args.existing_excel})")
+
+                async def run_oliveyoung_new_products():
+                    async with crawler:
+                        return await crawler.crawl_new_products_only(
+                            existing_excel_path=args.existing_excel,
+                            max_items_per_category=args.max_items_per_category
+                        )
+
+                import asyncio
+                products = asyncio.run(run_oliveyoung_new_products())
+
             else:  # list-url 옵션
                 logger.info(f"Oliveyoung 카테고리 페이지 크롤링: {args.list_url}")
                 

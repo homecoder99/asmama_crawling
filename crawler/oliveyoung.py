@@ -140,31 +140,32 @@ class OliveyoungCrawler(BaseCrawler):
         self.page = await self.crawl_context.new_page()
         self.logger.info("세션 리프레시 완료")
     
-    async def ensure_list_page(self, category_id: str, rows_per_page: int = 400) -> bool:
+    async def ensure_list_page(self, category_id: str, rows_per_page: int = 1000, sort_type: str = "01") -> bool:
         """
         카테고리 목록 페이지를 지속적으로 유지한다.
-        
+
         카테고리가 변경되거나 페이지가 없으면 새로 생성하고,
         동일한 카테고리면 기존 페이지를 재사용한다.
-        
+
         Args:
             category_id: 카테고리 ID
-            rows_per_page: 페이지당 표시할 아이템 수 (기본값: 400)
-            
+            rows_per_page: 페이지당 표시할 아이템 수 (기본값: 1000)
+            sort_type: 정렬 타입 (01=판매순, 02=최신순)
+
         Returns:
             페이지 준비 성공 여부
         """
         try:
             # 카테고리가 변경되거나 페이지가 없으면 새로 생성
-            if (not self.list_page or 
+            if (not self.list_page or
                 self.current_category_id != category_id or
                 self.list_page.is_closed()):
-                
+
                 # 기존 페이지가 있으면 닫기
                 if self.list_page and not self.list_page.is_closed():
                     await self.list_page.close()
                     self.logger.info(f"이전 카테고리 페이지 닫기: {self.current_category_id}")
-                
+
                 # 컨텍스트 확인
                 if not self.crawl_context:
                     try:
@@ -172,31 +173,31 @@ class OliveyoungCrawler(BaseCrawler):
                     except Exception as e:
                         self.logger.error(f"크롤링 컨텍스트 생성 실패: {e}")
                         return False
-                
+
                 # 새 카테고리 페이지 생성
                 self.list_page = await self.crawl_context.new_page()
-                
-                # 카테고리 URL 생성 및 이동 (rowsPerPage 파라미터 추가)
-                category_url = f"{self.CATEGORY_URL_TEMPLATE.format(categoryId=category_id)}&rowsPerPage={rows_per_page}"
-                
+
+                # 카테고리 URL 생성 및 이동 (rowsPerPage, prdSort 파라미터 추가)
+                category_url = f"{self.CATEGORY_URL_TEMPLATE.format(categoryId=category_id)}&prdSort={sort_type}&rowsPerPage={rows_per_page}"
+
                 self.logger.info(f"카테고리 페이지 이동: {category_url}")
-                
+
                 if not await self.safe_goto(self.list_page, category_url):
                     await self.list_page.close()
                     self.list_page = None
                     return False
-                
+
                 # 페이지 로딩 대기
                 from .utils import random_delay
-                await random_delay(2, 3)
-                
+                await random_delay(0.5, 1.5)
+
                 self.current_category_id = category_id
                 self.logger.info(f"카테고리 목록 페이지 준비 완료: {category_id}")
             else:
                 self.logger.debug(f"기존 카테고리 페이지 재사용: {category_id}")
-            
+
             return True
-            
+
         except Exception as e:
             self.logger.error(f"카테고리 목록 페이지 준비 실패: {e}")
             if self.list_page and not self.list_page.is_closed():
@@ -254,7 +255,7 @@ class OliveyoungCrawler(BaseCrawler):
                 # 상품명이 없으면 잘못된 페이지일 가능성
                 # 하지만 동적 로딩일 수도 있으므로 짧게 대기 후 재확인
                 from .utils import random_delay
-                await random_delay(2, 3)
+                await random_delay(0.5, 1.5)
                 if await product_name.count() == 0:
                     self.logger.warning(f"Oliveyoung 상품명 요소를 찾을 수 없음 ({goods_no}) - 유효하지 않은 페이지")
                     return False
@@ -458,7 +459,7 @@ class OliveyoungCrawler(BaseCrawler):
                 # 배치 간 지연 (서버 부담 경감)
                 if i + batch_size < len(goods_no_list):  # 마지막 배치가 아닌 경우만
                     from .utils import random_delay
-                    await random_delay(5, 7)  # 배치 간 5-7초 지연
+                    await random_delay(1, 2)  # 배치 간 1-2초 지연
                     self.logger.info(f"Oliveyoung 배치 간 지연 완료 (다음 배치: {batch_num + 1}/{total_batches})")
                 
             self.logger.info(f"Oliveyoung 전체 크롤링 완료: {len(all_products)}/{len(goods_no_list)}개 성공")
@@ -535,7 +536,7 @@ class OliveyoungCrawler(BaseCrawler):
                 # 카테고리 간 지연 (서버 부담 경감)
                 if i < len(categories):  # 마지막 카테고리가 아닌 경우만
                     from .utils import random_delay
-                    await random_delay(5, 8)  # 카테고리 간 5-8초 지연
+                    await random_delay(1, 2)  # 카테고리 간 1-2초 지연
                     self.logger.info(f"Oliveyoung 카테고리 간 지연 완료 (다음: {i + 1}/{len(categories)})")
             
             self.logger.info(f"Oliveyoung 전체 카테고리 크롤링 완료: {len(all_products)}개 제품")
@@ -545,32 +546,164 @@ class OliveyoungCrawler(BaseCrawler):
             self.logger.error(f"Oliveyoung 전체 카테고리 크롤링 실패: {str(e)}")
             return []
     
-    async def crawl_from_category(self, category_id: str, max_items: int = 15) -> List[Dict[str, Any]]:
+    async def crawl_from_category(self, category_id: str, max_items: int = 15, sort_type: str = "01") -> List[Dict[str, Any]]:
         """
         특정 카테고리에서 제품을 크롤링한다.
-        
+
         Args:
             category_id: 카테고리 ID
             max_items: 최대 크롤링 개수
-            
+            sort_type: 정렬 타입 (01=판매순, 02=최신순)
+
         Returns:
             크롤링된 제품 데이터 목록
         """
         try:
             # 카테고리 페이지에서 goodsNo 목록 추출
-            goods_no_list = await self._extract_goods_no_list_from_category(category_id, max_items)
-            
+            goods_no_list = await self._extract_goods_no_list_from_category(category_id, max_items, sort_type)
+
             if not goods_no_list:
                 self.logger.warning(f"Oliveyoung 카테고리 {category_id}에서 제품을 찾을 수 없음")
                 return []
-            
+
             self.logger.info(f"Oliveyoung 카테고리 {category_id}에서 {len(goods_no_list)}개 제품 발견")
-            
+
             # goodsNo 목록으로 제품 크롤링
             return await self.crawl_from_branduid_list(goods_no_list, batch_size=5)  # 카테고리별로는 배치 크기 작게
-            
+
         except Exception as e:
             self.logger.error(f"Oliveyoung 카테고리 {category_id} 크롤링 실패: {str(e)}")
+            return []
+
+    async def crawl_new_products_only(
+        self,
+        existing_excel_path: str,
+        max_items_per_category: int = 15,
+        category_filter: List[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        기존 크롤링 결과와 비교하여 최신 상품만 크롤링한다.
+
+        Args:
+            existing_excel_path: 기존 크롤링 결과 엑셀 파일 경로
+            max_items_per_category: 카테고리당 최대 크롤링 개수
+            category_filter: 제외할 카테고리 이름 목록 (None이면 모든 카테고리)
+
+        Returns:
+            크롤링된 신규 제품 데이터 목록
+        """
+        try:
+            # 1. 기존 엑셀에서 goods_no 목록 추출
+            self.logger.info(f"기존 크롤링 결과 로드: {existing_excel_path}")
+
+            import pandas as pd
+            from pathlib import Path
+
+            excel_path = Path(existing_excel_path)
+            if not excel_path.exists():
+                self.logger.error(f"기존 크롤링 결과 파일을 찾을 수 없음: {existing_excel_path}")
+                return []
+
+            existing_df = pd.read_excel(existing_excel_path)
+
+            if 'goods_no' not in existing_df.columns:
+                self.logger.error(f"엑셀 파일에 'goods_no' 칼럼이 없음: {existing_excel_path}")
+                return []
+
+            existing_goods_no_set = set(existing_df['goods_no'].dropna().astype(str))
+            self.logger.info(f"기존 크롤링 결과: {len(existing_goods_no_set)}개 상품")
+
+            # 2. 카테고리 목록 추출 및 필터링
+            all_categories = await self.extract_all_category_ids()
+            if not all_categories:
+                self.logger.warning("Oliveyoung 카테고리 목록을 찾을 수 없음")
+                return []
+
+            if category_filter:
+                filtered_categories = []
+                filter_lower = [name.lower() for name in category_filter]
+
+                for category in all_categories:
+                    if category["name"].strip().lower() in filter_lower:
+                        continue
+                    filtered_categories.append(category)
+
+                categories = filtered_categories
+                self.logger.info(f"카테고리 필터링 적용: {len(all_categories)}개 → {len(categories)}개")
+            else:
+                categories = all_categories
+
+            if not categories:
+                self.logger.warning("필터링 후 크롤링할 카테고리가 없음")
+                return []
+
+            # 3. 각 카테고리에서 최신 상품 목록 추출 (prdSort=02)
+            self.logger.info(f"Oliveyoung {len(categories)}개 카테고리에서 최신 상품 크롤링 시작")
+
+            all_new_goods_no = []
+
+            for i, category in enumerate(categories, 1):
+                category_id = category["id"]
+                category_name = category["name"]
+
+                self.logger.info(f"카테고리 {i}/{len(categories)} 처리 중: {category_id} ({category_name})")
+
+                # 카테고리에서 최신순 정렬로 goods_no 추출
+                goods_no_list = await self._extract_goods_no_list_from_category(
+                    category_id, max_items_per_category, sort_type="02"  # 최신순
+                )
+
+                if not goods_no_list:
+                    self.logger.warning(f"카테고리 {category_id}에서 상품을 찾을 수 없음")
+                    continue
+
+                # 기존 데이터와 비교하여 신규 상품만 필터링
+                new_goods_no = [
+                    goods_no for goods_no in goods_no_list
+                    if goods_no not in existing_goods_no_set
+                ]
+
+                self.logger.info(
+                    f"카테고리 {category_id}: {len(goods_no_list)}개 최신 상품 중 "
+                    f"{len(new_goods_no)}개 신규 상품 발견"
+                )
+
+                all_new_goods_no.extend(new_goods_no)
+
+                # 카테고리 간 지연
+                if i < len(categories):
+                    from .utils import random_delay
+                    await random_delay(1, 2)
+
+            # 4. 신규 상품 크롤링
+            if not all_new_goods_no:
+                self.logger.info("신규 상품이 없습니다.")
+                return []
+
+            self.logger.info(f"총 {len(all_new_goods_no)}개 신규 상품 크롤링 시작")
+
+            # 중복 제거
+            unique_new_goods_no = list(dict.fromkeys(all_new_goods_no))
+            if len(unique_new_goods_no) < len(all_new_goods_no):
+                self.logger.info(
+                    f"중복 제거: {len(all_new_goods_no)}개 → {len(unique_new_goods_no)}개"
+                )
+
+            # 배치 크롤링
+            new_products = await self.crawl_from_branduid_list(
+                unique_new_goods_no, batch_size=10
+            )
+
+            self.logger.info(
+                f"신규 상품 크롤링 완료: {len(new_products)}/{len(unique_new_goods_no)}개 성공"
+            )
+
+            return new_products
+
+        except Exception as e:
+            self.logger.error(f"���신 상품 크롤링 실패: {str(e)}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return []
     
 
@@ -604,7 +737,7 @@ class OliveyoungCrawler(BaseCrawler):
                 
                 # 페이지 로딩 대기
                 from .utils import random_delay
-                await random_delay(3, 5)
+                await random_delay(2, 3)
                 
                 # 메인 메뉴 내의 카테고리 링크만 선택 (더 정확한 선택자 사용)
                 # 메인 카테고리 (대분류): #gnbAllMenu .all_menu_wrap .sub_menu_box .sub_depth > a[data-ref-dispcatno]
@@ -702,34 +835,39 @@ class OliveyoungCrawler(BaseCrawler):
         categories = await self.extract_all_category_ids()
         return [category["id"] for category in categories]
     
-    async def _extract_goods_no_list_from_category(self, category_id: str, max_items: int = 48) -> List[str]:
+    async def _extract_goods_no_list_from_category(self, category_id: str, max_items: int = 48, sort_type: str = "01") -> List[str]:
         """
         카테고리 페이지에서 goodsNo 목록을 추출한다.
         지속적인 list_page를 사용하여 효율성을 높인다.
+
+        Args:
+            category_id: 카테고리 ID
+            max_items: 최대 아이템 수
+            sort_type: 정렬 타입 (01=판매순, 02=최신순)
         """
         try:
-            # 카테고리 목록 페이지 준비 (지속적으로 유지)
-            if not await self.ensure_list_page(category_id, max_items):
+            # 카테고리 목록 페이지 준비 (지속적으로 유지) - sort_type 추가
+            if not await self.ensure_list_page(category_id, max_items, sort_type):
                 self.logger.error(f"카테고리 페이지 준비 실패: {category_id}")
                 return []
-            
+
             # 상품 링크에서 goodsNo 추출
             product_links = self.list_page.locator('a[href*="goodsNo="]')
             link_count = await product_links.count()
-            
+
             goods_no_list = []
             processed_count = 0
-            
+
             self.logger.info(f"카테고리 {category_id}에서 {link_count}개 상품 링크 발견")
-            
+
             for i in range(min(link_count, max_items * 2)):  # 여유있게 추출 (중복 고려)
                 if processed_count >= max_items:
                     break
-                    
+
                 try:
                     link = product_links.nth(i)
                     href = await link.get_attribute('href')
-                    
+
                     if href and 'goodsNo=' in href:
                         # goodsNo 값 추출
                         match = re.search(r'goodsNo=([A-Z0-9]+)', href)
@@ -738,14 +876,14 @@ class OliveyoungCrawler(BaseCrawler):
                             if goods_no not in goods_no_list:  # 중복 제거
                                 goods_no_list.append(goods_no)
                                 processed_count += 1
-                                
+
                 except Exception as e:
                     self.logger.debug(f"상품 링크 {i} 처리 중 오류: {e}")
                     continue
-            
+
             self.logger.info(f"Oliveyoung 카테고리 {category_id}에서 {len(goods_no_list)}개 goodsNo 추출")
             return goods_no_list
-            
+
         except Exception as e:
             self.logger.error(f"Oliveyoung 카테고리 goodsNo 목록 추출 실패: {str(e)}")
             return []
@@ -795,7 +933,7 @@ class OliveyoungCrawler(BaseCrawler):
         try:
             # 페이지 로딩 대기
             from .utils import random_delay
-            await random_delay(2, 4)  # Oliveyoung 안티봇 대응 지연
+            await random_delay(0.5, 1.5)  # Oliveyoung 안티봇 대응 지연
             
             # 1. 기본 상품 정보 추출
             product_data = await self.product_extractor.extract_basic_info(page, goods_no)
