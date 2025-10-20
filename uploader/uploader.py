@@ -468,7 +468,7 @@ def main():
     parser.add_argument("--templates", default="uploader/templates", help="템플릿 파일 디렉토리 (기본값: uploader/templates)")
     parser.add_argument("--output", default="output", help="출력 디렉토리 (기본값: output)")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
-    parser.add_argument("--image-filter", default="advanced", choices=["ai", "advanced", "both"], 
+    parser.add_argument("--image-filter", default="advanced", choices=["none", "ai", "advanced", "both"], 
                        help="이미지 필터링 모드 (기본값: advanced) - ai: OpenAI Vision API, advanced: 로직 필터링, both: 둘 다")
     
     args = parser.parse_args()

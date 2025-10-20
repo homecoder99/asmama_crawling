@@ -27,21 +27,22 @@ class ImageProcessor:
     이미지를 필터링하고 대표 이미지를 선정한다.
     """
     
-    def __init__(self, filter_mode: str = "advanced", site: str = "asmama"):
+    def __init__(self, filter_mode: str = "none", site: str = "asmama"):
         """
         ImageProcessor 초기화.
-        
+
         Args:
-            filter_mode: 필터링 모드 ("ai", "advanced", "both")
+            filter_mode: 필터링 모드 ("none", "ai", "advanced", "both")
+                - "none": 필터링 없음 (모든 이미지 통과) - 기본값
                 - "ai": Claude Vision API만 사용
                 - "advanced": 고급 로직 필터링만 사용
-                - "both": 두 방법 모두 사용 (기본값)
+                - "both": 두 방법 모두 사용
             site: 사이트 타입 ("asmama", "oliveyoung")
         """
         self.logger = logging.getLogger(__name__)
         self.filter_mode = filter_mode
         self.site = site
-        
+
         # Claude 클라이언트 (AI 모드일 때만 초기화)
         if filter_mode in ["ai", "both"]:
             self.client = anthropic.Anthropic(
@@ -620,23 +621,38 @@ class ImageProcessor:
         try:
             # 필터링 모드에 따라 다른 검사 수행
             compliant_images = []
-            
-            for url in image_urls[:self.max_images_per_product]:
-                if self.filter_mode == "ai":
-                    # AI만 사용
-                    result = self._filter_with_ai_only(url)
-                elif self.filter_mode == "advanced":
-                    # 고급 로직만 사용
-                    result = self._filter_with_advanced_only(url)
-                else:  # "both"
-                    # 두 방법 모두 사용
-                    result = self._filter_with_both(url)
-                
-                if result and result["passed"]:
-                    compliant_images.append(result)
-                    self.logger.info(f"이미지 통과: {url} - {result.get('reason', '')}")
-                else:
-                    self.logger.warning(f"이미지 필터링 탈락: {url} - {result.get('reason', '알 수 없는 이유') if result else '처리 실패'}")
+
+            # filter_mode가 "none"이면 모든 이미지 통과
+            if self.filter_mode == "none":
+                product_id = product_data.get('branduid') or product_data.get('goods_no', 'unknown')
+                self.logger.info(f"이미지 필터링 비활성화: {product_id} - {len(image_urls)}개 이미지 모두 통과")
+
+                # 모든 이미지를 그대로 사용
+                for idx, url in enumerate(image_urls[:self.max_images_per_product]):
+                    compliant_images.append({
+                        "url": url,
+                        "passed": True,
+                        "compliance_score": 100 - idx,  # 순서대로 점수 부여
+                        "reason": "필터링 비활성화"
+                    })
+            else:
+                # 필터링 활성화된 경우
+                for url in image_urls[:self.max_images_per_product]:
+                    if self.filter_mode == "ai":
+                        # AI만 사용
+                        result = self._filter_with_ai_only(url)
+                    elif self.filter_mode == "advanced":
+                        # 고급 로직만 사용
+                        result = self._filter_with_advanced_only(url)
+                    else:  # "both"
+                        # 두 방법 모두 사용
+                        result = self._filter_with_both(url)
+
+                    if result and result["passed"]:
+                        compliant_images.append(result)
+                        self.logger.info(f"이미지 통과: {url} - {result.get('reason', '')}")
+                    else:
+                        self.logger.warning(f"이미지 필터링 탈락: {url} - {result.get('reason', '알 수 없는 이유') if result else '처리 실패'}")
             
             # 컴플라이언스 점수 기준으로 정렬
             compliant_images.sort(key=lambda x: x["compliance_score"], reverse=True)

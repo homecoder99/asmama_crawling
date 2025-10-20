@@ -26,14 +26,14 @@ class OliveyoungUploader:
     5. Excel 파일 출력
     """
     
-    def __init__(self, templates_dir: str, output_dir: str = "output", image_filter_mode: str = "advanced"):
+    def __init__(self, templates_dir: str, output_dir: str = "output", image_filter_mode: str = "none"):
         """
         OliveyoungUploader 초기화.
-        
+
         Args:
             templates_dir: 템플릿 파일들이 있는 디렉토리
             output_dir: 출력 파일 저장 디렉토리
-            image_filter_mode: 이미지 필터링 모드 ("ai", "advanced", "both")
+            image_filter_mode: 이미지 필터링 모드 ("none", "ai", "advanced", "both") - 기본값: "none"
         """
         self.templates_dir = Path(templates_dir)
         self.output_dir = Path(output_dir)
@@ -387,8 +387,8 @@ def main():
     parser.add_argument("--templates", default="uploader/templates", help="템플릿 파일 디렉토리 (기본값: uploader/templates)")
     parser.add_argument("--output", default="output", help="출력 디렉토리 (기본값: output)")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
-    parser.add_argument("--image-filter", default="advanced", choices=["ai", "advanced", "both"], 
-                       help="이미지 필터링 모드 (기본값: advanced) - ai: OpenAI Vision API, advanced: 로직 필터링, both: 둘 다")
+    parser.add_argument("--image-filter", default="none", choices=["none", "ai", "advanced", "both"],
+                       help="이미지 필터링 모드 (기본값: none) - none: 필터링 안함, ai: Claude Vision API, advanced: 로직 필터링, both: 둘 다")
     
     args = parser.parse_args()
     
