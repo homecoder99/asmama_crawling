@@ -42,3 +42,4 @@ oy_state.json
 playground/results
 data
 output
+*.dump
