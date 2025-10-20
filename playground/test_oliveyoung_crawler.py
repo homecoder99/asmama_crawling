@@ -325,7 +325,7 @@ async def test_category_filtering(filter_file: str = None, filter_words: list = 
             logger.error(f"카테고리 필터링 테스트 실행 중 오류: {str(e)}", exc_info=True)
 
 
-async def test_new_products_only(existing_excel: str, max_items_per_category: int = 15, use_excel: bool = True, output_filename: str = None):
+async def test_new_products_only(existing_excel: str, max_items_per_category: int = 15, use_excel: bool = True, output_filename: str = None, filter_file: str = "category_filter.txt"):
     """
     최신 상품만 크롤링 테스트 (기존 엑셀과 비교).
 
@@ -334,6 +334,7 @@ async def test_new_products_only(existing_excel: str, max_items_per_category: in
         max_items_per_category: 카테고리당 최대 크롤링 개수
         use_excel: Excel 저장소 사용 여부
         output_filename: 출력 파일명
+        filter_file: 카테고리 필터 파일 경로
     """
     logger.info("=== Oliveyoung 최신 상품 크롤링 테스트 시작 ===")
     logger.info(f"기존 데이터: {existing_excel}")
@@ -344,6 +345,13 @@ async def test_new_products_only(existing_excel: str, max_items_per_category: in
         logger.error(f"기존 엑셀 파일을 찾을 수 없습니다: {existing_excel}")
         return
 
+    # 카테고리 필터 로드
+    category_filter = read_category_filter_from_file(filter_file)
+    if category_filter:
+        logger.info(f"카테고리 필터 적용: {len(category_filter)}개 카테고리 제외")
+    else:
+        logger.info("카테고리 필터 없음: 모든 카테고리 크롤링")
+
     # 저장소 생성
     storage = create_storage("oliveyoung_new_products", use_excel, output_filename)
 
@@ -353,7 +361,7 @@ async def test_new_products_only(existing_excel: str, max_items_per_category: in
             new_products = await crawler.crawl_new_products_only(
                 existing_excel_path=existing_excel,
                 max_items_per_category=max_items_per_category,
-                category_filter=None  # 모든 카테고리
+                category_filter=category_filter  # 필터 적용
             )
 
             # 결과 정리
@@ -592,7 +600,8 @@ def main():
                 existing_excel=args.existing_excel,
                 max_items_per_category=args.max_items,
                 use_excel=args.use_excel,
-                output_filename=args.output_filename
+                output_filename=args.output_filename,
+                filter_file=args.filter_file
             ))
 
         elif args.test_categories:
