@@ -8,10 +8,16 @@ from typing import Dict, Any, List, Optional, Union
 import pandas as pd
 from datetime import datetime
 
-from data_loader import TemplateLoader
-from image_processor import ImageProcessor
-from product_filter import ProductFilter
-from field_transformer import FieldTransformer
+try:
+    from .data_loader import TemplateLoader
+    from .image_processor import ImageProcessor
+    from .product_filter import ProductFilter
+    from .field_transformer import FieldTransformer
+except ImportError:
+    from data_loader import TemplateLoader
+    from image_processor import ImageProcessor
+    from product_filter import ProductFilter
+    from field_transformer import FieldTransformer
 
 
 class AsamaUploader:

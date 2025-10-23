@@ -602,16 +602,25 @@ class ImageProcessor:
         Returns:
             처리된 상품 데이터 (filtered_images, representative_image 필드 추가)
         """
-        images_str = product_data.get("images", "")
-        if not images_str:
+        # images (문자열) 또는 image_urls (리스트) 지원
+        images_data = product_data.get("images") or product_data.get("image_urls")
+
+        if not images_data:
             product_id = product_data.get('branduid') or product_data.get('goods_no', 'unknown')
             self.logger.warning(f"이미지가 없는 상품: {product_id}")
             product_data["alternative_images"] = ""
             product_data["representative_image"] = ""
             return product_data
-        
-        # 이미지 URL 분리 ($$로 구분)
-        image_urls = [url.strip() for url in images_str.split("$$") if url.strip()]
+
+        # 이미지 URL 분리
+        if isinstance(images_data, list):
+            # 이미 리스트인 경우 (PostgreSQL adapter)
+            image_urls = [url.strip() for url in images_data if url and url.strip()]
+        elif isinstance(images_data, str):
+            # 문자열인 경우 ($$로 구분, Excel adapter)
+            image_urls = [url.strip() for url in images_data.split("$$") if url.strip()]
+        else:
+            image_urls = []
         
         if not image_urls:
             product_data["alternative_images"] = ""

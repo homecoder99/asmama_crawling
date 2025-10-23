@@ -6,12 +6,23 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import pandas as pd
+from pandas.api.types import is_scalar
 from datetime import datetime
 
-from data_loader import TemplateLoader
-from image_processor import ImageProcessor
-from product_filter import ProductFilter
-from oliveyoung_field_transformer import OliveyoungFieldTransformer
+# 패키지 내부에서 import 시도, 실패하면 스크립트 실행 모드
+try:
+    from .data_loader import TemplateLoader
+    from .image_processor import ImageProcessor
+    from .product_filter import ProductFilter
+    from .oliveyoung_field_transformer import OliveyoungFieldTransformer
+    from .data_adapter import DataAdapterFactory
+except ImportError:
+    # 스크립트로 직접 실행하는 경우
+    from data_loader import TemplateLoader
+    from image_processor import ImageProcessor
+    from product_filter import ProductFilter
+    from oliveyoung_field_transformer import OliveyoungFieldTransformer
+    from data_adapter import DataAdapterFactory
 
 
 class OliveyoungUploader:
@@ -26,7 +37,7 @@ class OliveyoungUploader:
     5. Excel 파일 출력
     """
     
-    def __init__(self, templates_dir: str, output_dir: str = "output", image_filter_mode: str = "none"):
+    def __init__(self, templates_dir: str, output_dir: str = "output", image_filter_mode: str = "none", db_storage=None):
         """
         OliveyoungUploader 초기화.
 
@@ -34,19 +45,21 @@ class OliveyoungUploader:
             templates_dir: 템플릿 파일들이 있는 디렉토리
             output_dir: 출력 파일 저장 디렉토리
             image_filter_mode: 이미지 필터링 모드 ("none", "ai", "advanced", "both") - 기본값: "none"
+            db_storage: qoo10_products 테이블 저장용 DB 저장소 (옵션)
         """
         self.templates_dir = Path(templates_dir)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
-        
+
         # 로깅 설정
         self.logger = logging.getLogger(__name__)
-        
+
         # 구성 요소 초기화
         self.template_loader = TemplateLoader(templates_dir)
         self.image_processor = ImageProcessor(filter_mode=image_filter_mode, site="oliveyoung")
         self.product_filter = None  # template_loader 로딩 후 초기화
         self.field_transformer = None  # template_loader 로딩 후 초기화
+        self.db_storage = db_storage  # qoo10_products 저장용
         
         # 통계
         self.stats = {
@@ -76,19 +89,28 @@ class OliveyoungUploader:
             self.logger.error(f"템플릿 로딩 실패: {str(e)}")
             return False
     
-    def process_crawled_data(self, input_file: str) -> bool:
+    def process_crawled_data(self, input_file: str = None, source_type: str = "excel", **adapter_kwargs) -> bool:
         """
         크롤링된 데이터를 처리하여 Qoo10 업로드 형식으로 변환한다.
-        
+
         Args:
-            input_file: 크롤링된 데이터 파일 경로 (Excel)
-            
+            input_file: 크롤링된 데이터 파일 경로 (Excel) - source_type="excel"인 경우 필수
+            source_type: 데이터 소스 타입 ("excel" 또는 "postgres") - 기본값: "excel"
+            **adapter_kwargs: 어댑터별 추가 인자 (connection_string, table_name, source_filter 등)
+
         Returns:
             처리 성공 여부
         """
         try:
-            # 1. 입력 데이터 로딩
-            products = self._load_crawled_data(input_file)
+            # 1. 입력 데이터 로딩 (Data Adapter 패턴 사용)
+            if source_type == "excel" and not input_file:
+                raise ValueError("source_type='excel'인 경우 input_file이 필요합니다.")
+
+            products = self._load_crawled_data_with_adapter(
+                source_type=source_type,
+                input_file=input_file,
+                **adapter_kwargs
+            )
     
             if not products:
                 self.logger.error("입력 데이터 로딩 실패")
@@ -113,67 +135,99 @@ class OliveyoungUploader:
             output_success = self._save_to_excel(transformed_products)
             if output_success:
                 self.stats["final_output_products"] = len(transformed_products)
-            
-            # 6. 결과 리포트 생성
+
+            # 6. DB 저장 (옵션)
+            if self.db_storage and output_success:
+                db_success = self._save_to_db(transformed_products)
+                if db_success:
+                    self.logger.info(f"qoo10_products 테이블에 {len(transformed_products)}개 제품 저장 완료")
+
+            # 7. 결과 리포트 생성
             self._generate_report(filter_stats)
-            
+
             return output_success
             
         except Exception as e:
             self.logger.error(f"데이터 처리 실패: {str(e)}")
             return False
     
-    def _load_crawled_data(self, input_file: str) -> List[Dict[str, Any]]:
+    def _load_crawled_data_with_adapter(self, source_type: str, input_file: str = None, **adapter_kwargs) -> List[Dict[str, Any]]:
         """
-        크롤링된 데이터를 로딩한다.
-        
+        Data Adapter 패턴을 사용하여 크롤링된 데이터를 로딩한다.
+
         Args:
-            input_file: 입력 파일 경로
-            
+            source_type: 데이터 소스 타입 ("excel" 또는 "postgres")
+            input_file: 입력 파일 경로 (source_type="excel"인 경우)
+            **adapter_kwargs: 어댑터별 추가 인자
+
         Returns:
             상품 데이터 목록
         """
         try:
-            input_path = Path(input_file)
-            
-            if input_path.suffix.lower() == '.xlsx':
-                # Excel 파일 로딩 - category_detail_id를 문자열로 강제 변환하여 정밀도 손실 방지
-                df = pd.read_excel(input_path, dtype={'category_detail_id': str})
-
-            elif input_path.suffix.lower() == '.json':
-                # JSON 파일 로딩
-                with open(input_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        df = pd.DataFrame(data)
-                    else:
-                        df = pd.DataFrame([data])
+            # 어댑터 생성
+            if source_type == "excel":
+                adapter = DataAdapterFactory.create_adapter("excel", file_path=input_file)
+            elif source_type == "postgres":
+                adapter = DataAdapterFactory.create_adapter("postgres", **adapter_kwargs)
             else:
-                self.logger.error(f"지원하지 않는 파일 형식: {input_path.suffix}")
+                raise ValueError(f"지원하지 않는 소스 타입: {source_type}")
+
+            # 데이터 로딩 (통일된 DataFrame 형식)
+            df = adapter.load_products()
+
+            if df.empty:
+                self.logger.warning(f"{source_type}에서 로드된 데이터가 없습니다.")
                 return []
-            
-            # DataFrame을 딕셔너리 목록으로 변환
+
+            # ① 스키마 감지는 행이 아니라 컬럼으로
+            if 'branduid' in df.columns:
+                if 'goods_no' not in df.columns:
+                    df = df.rename(columns={'branduid': 'goods_no'})
+                else:
+                    df['goods_no'] = df['goods_no'].fillna(df['branduid'])
+
+            if 'name' in df.columns:
+                if 'item_name' not in df.columns:
+                    df = df.rename(columns={'name': 'item_name'})
+                else:
+                    df['item_name'] = df['item_name'].fillna(df['name'])
+
             products = df.to_dict('records')
-            
-            # NaN 값을 빈 문자열로 변환
+
+            # ② NaN 치환은 **스칼라**에만 적용 (list/ndarray는 건드리지 않음)
             for product in products:
-                for key, value in product.items():
-                    if pd.isna(value):
-                        product[key] = ""
-            
-            # Oliveyoung 데이터 구조 검증
-            required_fields = ['goods_no', 'item_name', 'brand_name', 'price']
+                for k, v in product.items():
+                    if is_scalar(v) and pd.isna(v):
+                        product[k] = ""
+
+            # ③ 필수 필드 점검: 0원(price=0)은 허용, 공백/NaN만 경고
+            required_fields = ['goods_no', 'item_name', 'price']
             for product in products:
-                for field in required_fields:
-                    if field not in product:
-                        self.logger.warning(f"필수 필드 누락: {field}")
-            
-            self.logger.info(f"Oliveyoung 크롤링 데이터 로딩 완료: {len(products)}개 상품")
+                goods_no_empty = (str(product.get('goods_no', '')).strip() == '')
+                item_name_empty = (str(product.get('item_name', '')).strip() == '')
+                price_val = product.get('price', None)
+                price_missing = (price_val is None) or (isinstance(price_val, float) and pd.isna(price_val))
+                if goods_no_empty or item_name_empty or price_missing:
+                    self.logger.warning(f"필수 필드 누락: goods_no={product.get('goods_no')}, item_name={product.get('item_name')}, price={product.get('price')}")
+
+            self.logger.info(f"{source_type}에서 Oliveyoung 데이터 로딩 완료: {len(products)}개 상품")
             return products
-            
+
         except Exception as e:
-            self.logger.error(f"크롤링 데이터 로딩 실패: {str(e)}")
+            self.logger.error(f"크롤링 데이터 로딩 실패 ({source_type}): {str(e)}")
             return []
+
+    def _load_crawled_data(self, input_file: str) -> List[Dict[str, Any]]:
+        """
+        크롤링된 데이터를 로딩한다 (레거시 메서드, 호환성 유지).
+
+        Args:
+            input_file: 입력 파일 경로
+
+        Returns:
+            상품 데이터 목록
+        """
+        return self._load_crawled_data_with_adapter(source_type="excel", input_file=input_file)
     
     def _process_images(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -318,6 +372,39 @@ class OliveyoungUploader:
             self.logger.error(f"Oliveyoung 빠른 엑셀 저장 실패: {str(e)}")
             raise
     
+    def _save_to_db(self, products: List[Dict[str, Any]]) -> bool:
+        """
+        변환된 제품 데이터를 qoo10_products 테이블에 저장한다.
+
+        Args:
+            products: 변환된 상품 목록
+
+        Returns:
+            저장 성공 여부
+        """
+        try:
+            if not self.db_storage:
+                self.logger.warning("DB 저장소가 설정되지 않았습니다.")
+                return False
+
+            if not products:
+                self.logger.warning("저장할 제품 데이터가 없습니다.")
+                return False
+
+            # 저장
+            success = self.db_storage.save(products)
+
+            if success:
+                self.logger.info(f"qoo10_products 테이블에 {len(products)}개 제품 저장 성공")
+            else:
+                self.logger.error("qoo10_products 테이블 저장 실패")
+
+            return success
+
+        except Exception as e:
+            self.logger.error(f"qoo10_products 테이블 저장 중 에러: {str(e)}")
+            return False
+
     def _generate_report(self, filter_stats: Dict[str, Any]) -> None:
         """
         처리 결과 리포트를 생성한다.
@@ -389,7 +476,9 @@ def main():
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     parser.add_argument("--image-filter", default="none", choices=["none", "ai", "advanced", "both"],
                        help="이미지 필터링 모드 (기본값: none) - none: 필터링 안함, ai: Claude Vision API, advanced: 로직 필터링, both: 둘 다")
-    
+    parser.add_argument("--save-to-db", action="store_true",
+                       help="qoo10_products 테이블에도 저장 (DATABASE_URL 환경변수 필요)")
+
     args = parser.parse_args()
     
     # 로그 디렉토리 생성
@@ -422,15 +511,21 @@ def main():
         force=True
     )
     
+    # DB 저장소 초기화 (옵션)
+    db_storage = None
+    if args.save_to_db:
+        from uploader.qoo10_db_storage import Qoo10ProductsStorage
+        db_storage = Qoo10ProductsStorage()
+
     # 업로더 실행
-    uploader = OliveyoungUploader(args.templates, args.output, args.image_filter)
-    
+    uploader = OliveyoungUploader(args.templates, args.output, args.image_filter, db_storage=db_storage)
+
     try:
         # 템플릿 로딩
         if not uploader.load_templates():
             print("❌ 템플릿 로딩 실패")
             return False
-        
+
         # 데이터 처리
         success = uploader.process_crawled_data(args.input)
         

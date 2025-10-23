@@ -111,7 +111,7 @@ class AsmamaCrawler(BaseCrawler):
     async def crawl_from_branduid_list(
         self, 
         branduid_list: List[str],
-        batch_size: int = 15
+        batch_size: int = 50
     ) -> List[Dict[str, Any]]:
         """
         branduid 목록에서 여러 제품을 배치 단위로 크롤링한다.

@@ -33,16 +33,18 @@ class OliveyoungCrawler(BaseCrawler):
     CATEGORY_URL_TEMPLATE = "https://www.oliveyoung.co.kr/store/display/getMCategoryList.do?dispCatNo={categoryId}"
     MAIN_PAGE_URL = "https://www.oliveyoung.co.kr/store/main/main.do"
     
-    def __init__(self, storage: Any = None, max_workers: int = 1, cookie_file: str = "oy_state.json"):
+    def __init__(self, storage: Any = None, max_workers: int = 1, cookie_file: str = "oy_state.json", db_storage: Any = None):
         """
         Oliveyoung 크롤러를 초기화한다.
-        
+
         Args:
-            storage: 데이터 저장소 인스턴스
+            storage: 데이터 저장소 인스턴스 (엑셀)
             max_workers: 최대 동시 세션 수 (서버 부담 경감을 위해 기본값 1)
             cookie_file: 쿠키 저장 파일 경로
+            db_storage: PostgreSQL 저장소 인스턴스 (옵션)
         """
         super().__init__(storage, max_workers)
+        self.db_storage = db_storage
         # 환경변수 OY_LOG_LVL로 로그 레벨 제어 (기본: INFO)
         log_level_str = os.getenv('OY_LOG_LVL', 'INFO').upper()
         log_level = getattr(logging, log_level_str, logging.INFO)
@@ -403,14 +405,14 @@ class OliveyoungCrawler(BaseCrawler):
     async def crawl_from_branduid_list(
         self, 
         goods_no_list: List[str],
-        batch_size: int = 10
+        batch_size: int = 50
     ) -> List[Dict[str, Any]]:
         """
         goodsNo 목록에서 여러 제품을 배치 단위로 크롤링한다.
         
         Args:
             goods_no_list: goodsNo 목록 (Oliveyoung 상품 번호 목록)
-            batch_size: 배치 크기 (서버 부담 경감을 위해 기본값 10)
+            batch_size: 배치 크기 (서버 부담 경감을 위해 기본값 50)
             
         Returns:
             크롤링된 제품 데이터 목록
@@ -420,10 +422,10 @@ class OliveyoungCrawler(BaseCrawler):
                 self.logger.warning("Oliveyoung goodsNo 목록에서 제품 목록을 찾을 수 없음")
                 return []
             
-            # 새로운 크롤링 세션 시작 - 기존 저장소 데이터 초기화
+            # 새로운 크롤링 세션 시작 - 내부 데이터는 초기화하지 않음 (카테고리별 누적)
+            # Note: storage.data는 카테고리별로 누적되어야 함
             if self.storage:
-                self.storage.data = []  # 중복 방지를 위한 내부 데이터 초기화
-                self.logger.info("Oliveyoung 저장소 내부 데이터 초기화 완료")
+                self.logger.info("Oliveyoung 저장소 준비 완료 (기존 데이터 유지)")
             
             # goodsNo 중복 검사 및 제거
             original_count = len(goods_no_list)
@@ -435,39 +437,48 @@ class OliveyoungCrawler(BaseCrawler):
             self.logger.info(f"Oliveyoung goodsNo 목록에서 {len(goods_no_list)}개 제품 발견 (배치 크기: {batch_size})")
             
             all_products = []
-            
-            # 배치 단위로 처리
+            total_saved = 0
+
+            # 배치 단위로 처리 (크롤링 + 즉시 저장으로 메모리 절약)
             for i in range(0, len(goods_no_list), batch_size):
                 batch = goods_no_list[i:i + batch_size]
                 batch_num = (i // batch_size) + 1
                 total_batches = (len(goods_no_list) + batch_size - 1) // batch_size
-                
+
                 self.logger.info(f"Oliveyoung 배치 {batch_num}/{total_batches} 처리 중 ({len(batch)}개 제품)")
-                
+
                 # 각 제품 크롤링 (순차 처리, max_workers=1)
                 tasks = [self.crawl_single_product(goods_no) for goods_no in batch]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                
+
                 # 성공한 결과만 필터링
                 batch_products = [
-                    result for result in results 
+                    result for result in results
                     if isinstance(result, dict) and result is not None
                 ]
-                
-                all_products.extend(batch_products)
-                
+
+                # 배치별로 즉시 저장 (메모리 절약)
+                if batch_products:
+                    # 엑셀 저장
+                    if self.storage:
+                        self.storage.save(batch_products)
+                        total_saved += len(batch_products)
+                        self.logger.info(f"Oliveyoung 배치 {batch_num} 저장: {len(batch_products)}개 (누적: {total_saved}개)")
+
+                    # DB 저장 (옵션)
+                    if self.db_storage:
+                        self.db_storage.save(batch_products)
+                        self.logger.info(f"Oliveyoung 배치 {batch_num} DB 저장: {len(batch_products)}개")
+
+                    all_products.extend(batch_products)
+
                 # 배치 간 지연 (서버 부담 경감)
                 if i + batch_size < len(goods_no_list):  # 마지막 배치가 아닌 경우만
                     from .utils import random_delay
                     await random_delay(1, 2)  # 배치 간 1-2초 지연
                     self.logger.info(f"Oliveyoung 배치 간 지연 완료 (다음 배치: {batch_num + 1}/{total_batches})")
-                
+
             self.logger.info(f"Oliveyoung 전체 크롤링 완료: {len(all_products)}/{len(goods_no_list)}개 성공")
-            
-            # 크롤링 결과를 저장소에 저장
-            if self.storage and all_products:
-                self.storage.save(all_products)
-                self.logger.info(f"Oliveyoung {len(all_products)}개 제품 데이터를 저장소에 저장")
             
             return all_products
             
@@ -569,7 +580,7 @@ class OliveyoungCrawler(BaseCrawler):
             self.logger.info(f"Oliveyoung 카테고리 {category_id}에서 {len(goods_no_list)}개 제품 발견")
 
             # goodsNo 목록으로 제품 크롤링
-            return await self.crawl_from_branduid_list(goods_no_list, batch_size=5)  # 카테고리별로는 배치 크기 작게
+            return await self.crawl_from_branduid_list(goods_no_list, batch_size=50)  # 카테고리별로는 배치 크기 작게
 
         except Exception as e:
             self.logger.error(f"Oliveyoung 카테고리 {category_id} 크롤링 실패: {str(e)}")
@@ -691,7 +702,7 @@ class OliveyoungCrawler(BaseCrawler):
 
             # 배치 크롤링
             new_products = await self.crawl_from_branduid_list(
-                unique_new_goods_no, batch_size=10
+                unique_new_goods_no, batch_size=50
             )
 
             self.logger.info(

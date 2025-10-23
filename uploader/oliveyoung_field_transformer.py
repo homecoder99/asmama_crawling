@@ -14,9 +14,15 @@ import os
 from pathlib import Path
 from datetime import datetime
 import dotenv
-from data_loader import TemplateLoader
-from field_transformer import FieldTransformer
-from brand_translation_manager import BrandTranslationManager
+
+try:
+    from .data_loader import TemplateLoader
+    from .field_transformer import FieldTransformer
+    from .brand_translation_manager import BrandTranslationManager
+except ImportError:
+    from data_loader import TemplateLoader
+    from field_transformer import FieldTransformer
+    from brand_translation_manager import BrandTranslationManager
 
 # 환경변수 로드
 dotenv.load_dotenv()

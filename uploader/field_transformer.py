@@ -10,7 +10,11 @@ import logging
 import openai
 import os
 import dotenv
-from data_loader import TemplateLoader
+
+try:
+    from .data_loader import TemplateLoader
+except ImportError:
+    from data_loader import TemplateLoader
 
 # 환경변수 로드
 dotenv.load_dotenv()

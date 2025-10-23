@@ -6,10 +6,15 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent))
 
+# .env 파일 로드 (DATABASE_URL 등)
+from dotenv import load_dotenv
+load_dotenv()
+
 from crawler.asmama import AsmamaCrawler
 from crawler.oliveyoung import OliveyoungCrawler
 from crawler.storage import ExcelStorage
 from crawler.utils import setup_logger
+import os
 
 logger = setup_logger(__name__)
 
@@ -102,7 +107,13 @@ def main():
         help="출력 Excel 파일 경로",
         default=None
     )
-    
+    parser.add_argument(
+        "--save-to-db",
+        action="store_true",
+        help="PostgreSQL 데이터베이스에도 저장 (DATABASE_URL 환경변수 필요)",
+        default=False
+    )
+
     args = parser.parse_args()
     
     # 입력 검증
@@ -146,7 +157,18 @@ def main():
         
         # 사이트별 크롤러 초기화
         storage = ExcelStorage(str(output_path))
-        
+
+        # DB 저장 옵션 처리
+        db_storage = None
+        if args.save_to_db:
+            if not os.getenv("DATABASE_URL"):
+                logger.error("--save-to-db 옵션 사용 시 DATABASE_URL 환경변수가 필요합니다.")
+                sys.exit(1)
+
+            from crawler.db_storage import PostgresStorage
+            db_storage = PostgresStorage()
+            logger.info("PostgreSQL 저장소 활성화됨")
+
         if args.site == "asmama":
             crawler = AsmamaCrawler(storage=storage)
             
@@ -176,7 +198,7 @@ def main():
                 products = asyncio.run(run_asmama_list())
                 
         else:  # oliveyoung
-            crawler = OliveyoungCrawler(storage=storage)
+            crawler = OliveyoungCrawler(storage=storage, db_storage=db_storage)
             
             # Oliveyoung 크롤러 실행
             if args.goods_no:
@@ -203,9 +225,22 @@ def main():
             elif args.all_categories:
                 logger.info(f"Oliveyoung 모든 카테고리 크롤링 (카테고리당 최대 {args.max_items_per_category}개)")
 
+                # category_filter.txt 파일 읽기
+                category_filter = None
+                filter_file = "category_filter.txt"
+                if Path(filter_file).exists():
+                    try:
+                        with open(filter_file, 'r', encoding='utf-8') as f:
+                            lines = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
+                            if lines:
+                                category_filter = lines
+                                logger.info(f"카테고리 필터 적용: {len(category_filter)}개 카테고리 제외")
+                    except Exception as e:
+                        logger.warning(f"카테고리 필터 파일 읽기 실패: {str(e)}")
+
                 async def run_oliveyoung_all_categories():
                     async with crawler:
-                        return await crawler.crawl_all_categories(args.max_items_per_category)
+                        return await crawler.crawl_all_categories(args.max_items_per_category, category_filter)
 
                 import asyncio
                 products = asyncio.run(run_oliveyoung_all_categories())
@@ -213,11 +248,25 @@ def main():
             elif args.new_products_only:
                 logger.info(f"Oliveyoung 최신 상품만 크롤링 (기존: {args.existing_excel})")
 
+                # category_filter.txt 파일 읽기
+                category_filter = None
+                filter_file = "category_filter.txt"
+                if Path(filter_file).exists():
+                    try:
+                        with open(filter_file, 'r', encoding='utf-8') as f:
+                            lines = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
+                            if lines:
+                                category_filter = lines
+                                logger.info(f"카테고리 필터 적용: {len(category_filter)}개 카테고리 제외")
+                    except Exception as e:
+                        logger.warning(f"카테고리 필터 파일 읽기 실패: {str(e)}")
+
                 async def run_oliveyoung_new_products():
                     async with crawler:
                         return await crawler.crawl_new_products_only(
                             existing_excel_path=args.existing_excel,
-                            max_items_per_category=args.max_items_per_category
+                            max_items_per_category=args.max_items_per_category,
+                            category_filter=category_filter
                         )
 
                 import asyncio

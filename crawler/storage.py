@@ -133,12 +133,24 @@ class ExcelStorage(BaseStorage):
             # 단일 데이터를 리스트로 변환
             if isinstance(data, dict):
                 data = [data]
-            
-            # 기존 데이터에 추가 (배치 저장 시 중복 방지)
-            self.data.extend(data)
-            
+
+            # 기존 Excel 파일에서 데이터 로드 (메모리 절약을 위해 매번 로드)
+            existing_data = []
+            if self.file_path.exists():
+                try:
+                    existing_df = pd.read_excel(self.file_path)
+                    existing_data = existing_df.to_dict('records')
+                except Exception as e:
+                    self.logger.warning(f"기존 파일 로드 실패 (새로 생성): {str(e)}")
+
+            # 새 데이터 추가
+            all_data = existing_data + data
+
+            # self.data는 누적하지 않고 현재 배치만 유지 (메모리 절약)
+            self.data = all_data
+
             # DataFrame으로 변환
-            df = pd.DataFrame(self.data)
+            df = pd.DataFrame(all_data)
             
             # FIX ME: 스키마 변경 시 컬럼 순서 및 타입 조정 필요
             # 현재 스키마: branduid, name, price, options, image_urls, detail_html

@@ -28,3 +28,6 @@ Pillow>=10.0.0
 
 # Database dependencies
 psycopg2-binary>=2.9.10
+
+# GUI
+gradio>=4.0.0

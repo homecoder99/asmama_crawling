@@ -46,6 +46,9 @@ python main.py --site=oliveyoung --all-categories --max-items-per-category=15
 
 # 기존 URL 방식 (호환성)
 python main.py --site=oliveyoung --list-url="https://www.oliveyoung.co.kr/store/display/getMCategoryList.do?dispCatNo=100000100010001" --max-items=50
+
+# PostgreSQL에도 저장 (듀얼 스토리지)
+python main.py --site=oliveyoung --all-categories --save-to-db
 ```
 
 #### Multi-site Support
@@ -139,15 +142,32 @@ BaseCrawler (crawler/base.py)
 ```
 BaseStorage (crawler/storage.py)
     ↓ [Abstract storage interface]
-├── ExcelStorage    # Primary: Excel files with JSON serialization for arrays
-└── JSONStorage     # Development: Direct JSON output
+├── ExcelStorage      # Primary: Excel files with JSON serialization for arrays
+├── JSONStorage       # Development: Direct JSON output
+└── PostgresStorage   # PostgreSQL database storage (crawler/db_storage.py)
 ```
 
 **Important Notes:**
 
 - Excel storage converts Python lists to JSON strings for compatibility
-- Schema includes FIX ME comments for future PostgreSQL migration
+- PostgresStorage converts crawler schema to DB schema automatically
+- **Dual Storage Support**: Crawlers can save to both Excel and PostgreSQL simultaneously
 - All storage operations are synchronous but called from async context
+
+**Dual Storage Usage:**
+
+```python
+from crawler.oliveyoung import OliveyoungCrawler
+from crawler.storage import ExcelStorage
+from crawler.db_storage import PostgresStorage
+
+excel_storage = ExcelStorage("data/products.xlsx")
+db_storage = PostgresStorage()  # Uses DATABASE_URL env var
+
+async with OliveyoungCrawler(storage=excel_storage, db_storage=db_storage) as crawler:
+    products = await crawler.crawl_all_categories()
+    # Saves to both Excel and PostgreSQL automatically
+```
 
 ### Data Schema (Current)
 
@@ -180,6 +200,7 @@ crawler/           # Core crawling logic
 ├── asmama.py     # Asmama-specific crawler implementation
 ├── oliveyoung.py # Oliveyoung-specific crawler implementation
 ├── storage.py    # Storage interfaces (Excel/JSON)
+├── db_storage.py # PostgreSQL storage implementation
 ├── utils.py      # Utilities (logging, delays, parsing)
 ├── cookies.py    # Cookie management system
 ├── validator.py  # Data validation utilities
@@ -197,6 +218,7 @@ playground/       # Development and debugging tools
 uploader/         # Qoo10 upload data transformation
 ├── uploader.py      # Main upload transformer
 ├── data_loader.py   # Excel data loading utilities
+├── data_adapter.py  # Data source adapter (Excel/PostgreSQL)
 ├── image_processor.py # Image processing and filtering
 ├── product_filter.py  # Product filtering logic
 └── field_transformer.py # Field mapping and transformation
@@ -401,6 +423,20 @@ The `uploader/` module converts crawled data to Qoo10-compatible format:
 - **Image processing**: Advanced filtering and validation of product images
 - **Brand filtering**: Excludes banned brands and applies warning keyword filters
 - **Field mapping**: Transforms crawler data to marketplace-specific fields
+- **Data Adapter Pattern**: Supports both Excel and PostgreSQL as data sources
+
+#### Using PostgreSQL as Data Source
+
+```bash
+# Upload from PostgreSQL instead of Excel
+cd uploader
+python -c "
+from oliveyoung_uploader import OliveyoungUploader
+uploader = OliveyoungUploader(templates_dir='templates')
+uploader.load_templates()
+uploader.process_crawled_data(source_type='postgres', source_filter='oliveyoung')
+"
+```
 
 ## Task Master AI Integration
 
