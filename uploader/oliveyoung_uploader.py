@@ -37,7 +37,7 @@ class OliveyoungUploader:
     5. Excel 파일 출력
     """
     
-    def __init__(self, templates_dir: str, output_dir: str = "output", image_filter_mode: str = "none", db_storage=None):
+    def __init__(self, templates_dir: str, output_dir: str = "output", image_filter_mode: str = "none", db_storage=None, uploaded_by: Optional[str] = None):
         """
         OliveyoungUploader 초기화.
 
@@ -46,6 +46,7 @@ class OliveyoungUploader:
             output_dir: 출력 파일 저장 디렉토리
             image_filter_mode: 이미지 필터링 모드 ("none", "ai", "advanced", "both") - 기본값: "none"
             db_storage: qoo10_products 테이블 저장용 DB 저장소 (옵션)
+            uploaded_by: 업로드 유저 식별자 (upload_history 조회용, None이면 레거시 방식)
         """
         self.templates_dir = Path(templates_dir)
         self.output_dir = Path(output_dir)
@@ -60,6 +61,7 @@ class OliveyoungUploader:
         self.product_filter = None  # template_loader 로딩 후 초기화
         self.field_transformer = None  # template_loader 로딩 후 초기화
         self.db_storage = db_storage  # qoo10_products 저장용
+        self.uploaded_by = uploaded_by  # 유저 식별자
         
         # 통계
         self.stats = {
@@ -81,7 +83,7 @@ class OliveyoungUploader:
             success = self.template_loader.load_all_templates()
             if success:
                 # 템플릿 로딩 후 필터링 및 변환 시스템 초기화
-                self.product_filter = ProductFilter(self.template_loader)
+                self.product_filter = ProductFilter(self.template_loader, uploaded_by=self.uploaded_by)
                 self.field_transformer = OliveyoungFieldTransformer(self.template_loader)
                 self.logger.info("Oliveyoung 템플릿 로딩 및 시스템 초기화 완료")
             return success

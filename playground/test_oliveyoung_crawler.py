@@ -18,10 +18,10 @@ logger = setup_logger(__name__)
 def read_category_filter_from_file(file_path: str) -> list:
     """
     파일에서 카테고리 필터링 단어를 읽어온다.
-    
+
     Args:
         file_path: 필터링 단어가 저장된 파일 경로
-        
+
     Returns:
         필터링 단어 목록 (줄바꿈으로 구분된 단어들)
     """
@@ -30,22 +30,22 @@ def read_category_filter_from_file(file_path: str) -> list:
         if not file_path.exists():
             logger.warning(f"카테고리 필터 파일이 존재하지 않음: {file_path}")
             return []
-        
+
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-        
+
         # 빈 줄과 주석(#으로 시작)을 제외하고 단어 추출
         filter_words = []
         for line in lines:
             line = line.strip()
             if line and not line.startswith('#'):
                 filter_words.append(line)
-        
+
         logger.info(f"카테고리 필터 파일에서 {len(filter_words)}개 단어 로드: {file_path}")
         logger.info(f"필터링 단어: {', '.join(filter_words)}")
-        
+
         return filter_words
-        
+
     except Exception as e:
         logger.error(f"카테고리 필터 파일 읽기 실패: {str(e)}")
         return []
@@ -54,12 +54,12 @@ def read_category_filter_from_file(file_path: str) -> list:
 def create_storage(base_name: str, use_excel: bool = False, output_filename: str = None):
     """
     저장소를 생성한다.
-    
+
     Args:
         base_name: 기본 파일명
         use_excel: Excel 저장소 사용 여부 (기본값: False, JSON 사용)
         output_filename: 고정 출력 파일명 (지정시 타임스탬프 사용 안함)
-        
+
     Returns:
         생성된 저장소 인스턴스
     """
@@ -74,7 +74,7 @@ def create_storage(base_name: str, use_excel: bool = False, output_filename: str
             storage_path = f"data/{base_name}_{timestamp}.xlsx"
         else:
             storage_path = f"data/{base_name}_{timestamp}.json"
-    
+
     if use_excel or (output_filename and output_filename.endswith('.xlsx')):
         return ExcelStorage(storage_path)
     else:
@@ -84,7 +84,7 @@ def create_storage(base_name: str, use_excel: bool = False, output_filename: str
 async def test_single_product(goods_no: str, use_excel: bool = False, output_filename: str = None):
     """
     단일 제품 크롤링 테스트.
-    
+
     Args:
         goods_no: 테스트할 goodsNo
         use_excel: Excel 저장소 사용 여부
@@ -93,15 +93,15 @@ async def test_single_product(goods_no: str, use_excel: bool = False, output_fil
     logger.info(f"Oliveyoung 단일 제품 테스트 시작: {goods_no}")
     storage_type = "Excel" if use_excel else "JSON"
     logger.info(f"저장소 타입: {storage_type}")
-    
+
     # 저장소 생성
     storage = create_storage(f"test_oliveyoung_{goods_no}", use_excel, output_filename)
-    
+
     async with OliveyoungCrawler(storage=storage) as crawler:
         try:
             # 제품 크롤링
             product_data = await crawler.crawl_single_product(goods_no)
-            
+
             if product_data:
                 logger.info("제품 크롤링 성공!")
                 logger.info(f"제품명: {product_data.get('item_name', 'N/A')}")
@@ -110,19 +110,19 @@ async def test_single_product(goods_no: str, use_excel: bool = False, output_fil
                 logger.info(f"카테고리: {product_data.get('category_name', 'N/A')}")
                 logger.info(f"옵션 가능: {product_data.get('is_option_available', False)}")
                 logger.info(f"품절 여부: {product_data.get('is_soldout', False)}")
-                
+
                 # 이미지 개수 출력
                 images = product_data.get('images', '')
                 image_count = len(images.split('$$')) if images else 0
                 logger.info(f"이미지 개수: {image_count}")
-                
+
                 # 결과 저장
                 storage.save(product_data)
                 logger.info(f"결과 저장 완료: {storage.file_path}")
-                
+
             else:
                 logger.error("제품 크롤링 실패")
-                
+
         except Exception as e:
             logger.error(f"테스트 실행 중 오류: {str(e)}", exc_info=True)
 
@@ -130,7 +130,7 @@ async def test_single_product(goods_no: str, use_excel: bool = False, output_fil
 async def test_category_crawling(category_id: str, max_items: int = 10, use_excel: bool = False):
     """
     카테고리 페이지 크롤링 테스트.
-    
+
     Args:
         category_id: 테스트할 카테고리 ID
         max_items: 최대 크롤링 아이템 수
@@ -140,27 +140,27 @@ async def test_category_crawling(category_id: str, max_items: int = 10, use_exce
     logger.info(f"최대 아이템 수: {max_items}")
     storage_type = "Excel" if use_excel else "JSON"
     logger.info(f"저장소 타입: {storage_type}")
-    
+
     # 저장소 생성
     storage = create_storage(f"test_oliveyoung_category_{category_id}", use_excel)
-    
+
     async with OliveyoungCrawler(storage=storage) as crawler:
         try:
             # 카테고리 크롤링
             products = await crawler.crawl_from_category(category_id, max_items)
-            
+
             logger.info(f"총 {len(products)}개 제품 크롤링 완료")
-            
+
             for i, product in enumerate(products[:3], 1):  # 처음 3개만 출력
                 logger.info(f"제품 {i}: {product.get('item_name', 'N/A')} - {product.get('price', 'N/A')}")
-            
+
             if products:
                 # 결과 저장
                 storage.save(products)
                 logger.info(f"결과 저장 완료: {storage.file_path}")
             else:
                 logger.warning("크롤링된 제품이 없습니다")
-                
+
         except Exception as e:
             logger.error(f"카테고리 테스트 실행 중 오류: {str(e)}", exc_info=True)
 
@@ -168,23 +168,23 @@ async def test_category_crawling(category_id: str, max_items: int = 10, use_exce
 async def test_goods_no_extraction(category_id: str, max_items: int = 10):
     """
     카테고리에서 goodsNo 추출 테스트.
-    
+
     Args:
         category_id: 테스트할 카테고리 ID
         max_items: 최대 추출 아이템 수
     """
     logger.info(f"Oliveyoung goodsNo 추출 테스트: {category_id}")
-    
+
     async with OliveyoungCrawler() as crawler:
         try:
             # goodsNo 목록 추출
             goods_no_list = await crawler._extract_goods_no_list_from_category(category_id, max_items)
-            
+
             logger.info(f"추출된 goodsNo 개수: {len(goods_no_list)}")
-            
+
             for i, goods_no in enumerate(goods_no_list[:5], 1):  # 처음 5개만 출력
                 logger.info(f"goodsNo {i}: {goods_no}")
-                
+
         except Exception as e:
             logger.error(f"goodsNo 추출 테스트 실행 중 오류: {str(e)}", exc_info=True)
 
@@ -194,14 +194,14 @@ async def test_category_extraction():
     메인 페이지에서 카테고리 ID와 이름 추출 테스트.
     """
     logger.info("Oliveyoung 카테고리 ID와 이름 추출 테스트 시작")
-    
+
     async with OliveyoungCrawler() as crawler:
         try:
             # 카테고리 ID와 이름 추출
             categories = await crawler.extract_all_category_ids()
-            
+
             logger.info(f"추출된 카테고리 개수: {len(categories)}")
-            
+
             # 길이별 카테고리 분류 및 출력
             by_length = {}
             for category in categories:
@@ -210,7 +210,7 @@ async def test_category_extraction():
                 if length not in by_length:
                     by_length[length] = []
                 by_length[length].append(f"{cat_id}({category['name']})")
-            
+
             logger.info("카테고리 구조:")
             for length in sorted(by_length.keys()):
                 count = len(by_length[length])
@@ -218,7 +218,7 @@ async def test_category_extraction():
                 if count > 3:
                     examples += '...'
                 logger.info(f"  길이 {length:2d}자리: {count:3d}개 - {examples}")
-                
+
         except Exception as e:
             logger.error(f"카테고리 추출 테스트 실행 중 오류: {str(e)}", exc_info=True)
 
@@ -226,7 +226,7 @@ async def test_category_extraction():
 async def test_category_filtering(filter_file: str = None, filter_words: list = None, max_items_per_category: int = 5, use_excel: bool = False, output_filename: str = None):
     """
     카테고리 필터링 기능 테스트.
-    
+
     Args:
         filter_file: 필터링 단어가 저장된 파일 경로
         filter_words: 직접 전달할 필터링 단어 목록
@@ -234,7 +234,7 @@ async def test_category_filtering(filter_file: str = None, filter_words: list = 
         use_excel: Excel 저장소 사용 여부
     """
     logger.info("=== Oliveyoung 카테고리 필터링 테스트 시작 ===")
-    
+
     # 필터링 단어 준비
     if filter_file:
         category_filter = read_category_filter_from_file(filter_file)
@@ -247,82 +247,203 @@ async def test_category_filtering(filter_file: str = None, filter_words: list = 
     else:
         logger.error("필터링 단어가 없습니다. --filter-file 또는 --filter-words를 사용하세요.")
         return
-    
+
     if not category_filter:
         logger.error("유효한 필터링 단어가 없습니다.")
         return
-    
+
     logger.info(f"카테고리당 최대 아이템: {max_items_per_category}")
     storage_type = "Excel" if use_excel else "JSON"
     logger.info(f"저장소 타입: {storage_type}")
-    
+
     # 저장소 생성
     storage = create_storage(f"oliveyoung_products", use_excel, output_filename)
-    
+
     async with OliveyoungCrawler(storage=storage) as crawler:
         try:
             # 1단계: 모든 카테고리 추출
             logger.info("1단계: 카테고리 ID와 이름 추출 중...")
             all_categories = await crawler.extract_all_category_ids()
-            
+
             if not all_categories:
                 logger.error("카테고리를 추출할 수 없습니다")
                 return
-            
+
             logger.info(f"전체 카테고리 개수: {len(all_categories)}")
-            
+
             # 2단계: 카테고리 필터링 테스트
             logger.info("2단계: 카테고리 필터링 적용 중...")
-            
+
             # 수동 필터링 (테스트 확인용)
             manual_filtered = []
             filter_lower = [name.lower() for name in category_filter]
-            
+
             for category in all_categories:
                 # 현재 카테고리가 필터 목록에 있으면 건너뛴다
                 if category["name"].strip().lower() in filter_lower:
                     continue
                 manual_filtered.append(category)
-            
+
             logger.info(f"수동 필터링 결과: {len(manual_filtered)}개 카테고리")
             for category in manual_filtered[:10]:  # 처음 10개만 로깅
                 logger.info(f"  - {category['id']}: {category['name']}")
             if len(manual_filtered) > 10:
                 logger.info(f"  ... 및 {len(manual_filtered) - 10}개 더")
-            
+
             # 3단계: crawl_all_categories로 필터링 크롤링 실행
             logger.info("3단계: 필터링된 카테고리에서 제품 크롤링 중...")
-            
+
             if not manual_filtered:
                 logger.warning("필터링된 카테고리가 없습니다")
                 return
-            
+
             # crawl_all_categories 메서드 사용 (필터링된 모든 카테고리)
             all_products = await crawler.crawl_all_categories(
                 max_items_per_category=max_items_per_category,
                 category_filter=category_filter
             )
-            
+
             # 4단계: 결과 정리
             logger.info("=== Oliveyoung 카테고리 필터링 테스트 완료 ===")
             logger.info(f"사용된 필터링 단어: {', '.join(category_filter)}")
             logger.info(f"필터링된 카테고리 개수: {len(manual_filtered)}개")
             logger.info(f"총 크롤링된 제품: {len(all_products)}개")
-            
+
             if all_products:
                 # 크롤링된 제품 정보 출력 (처음 3개만)
                 logger.info("크롤링된 제품 예시:")
                 for i, product in enumerate(all_products[:3], 1):
                     logger.info(f"  제품 {i}: {product.get('item_name', 'N/A')} - {product.get('price', 'N/A')} - 카테고리: {product.get('category_name', 'N/A')}")
-                
+
                 # 결과 저장
                 storage.save(all_products)
                 logger.info(f"결과 저장 완료: {storage.file_path}")
             else:
                 logger.warning("크롤링된 제품이 없습니다")
-                
+
         except Exception as e:
             logger.error(f"카테고리 필터링 테스트 실행 중 오류: {str(e)}", exc_info=True)
+
+
+async def crawl_new_products_from_db(max_items_per_category: int = 15, filter_file: str = "category_filter.txt"):
+    """
+    DB 기반 새상품 크롤링 (crawled_products 중복 확인).
+
+    Args:
+        max_items_per_category: 카테고리당 최대 크롤링 개수
+        filter_file: 카테고리 필터 파일 경로
+    """
+    import psycopg2
+    from dotenv import load_dotenv
+    import os
+
+    logger.info("=== Oliveyoung DB 기반 새상품 크롤링 시작 ===")
+    logger.info(f"카테고리당 최대 아이템: {max_items_per_category}")
+
+    # 환경 변수 로드
+    load_dotenv()
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        logger.error("DATABASE_URL 환경 변수가 설정되지 않았습니다")
+        return
+
+    # DB 연결
+    try:
+        conn = psycopg2.connect(db_url)
+        logger.info("PostgreSQL 연결 성공")
+    except Exception as e:
+        logger.error(f"PostgreSQL 연결 실패: {str(e)}")
+        return
+
+    # 카테고리 필터 로드
+    category_filter = read_category_filter_from_file(filter_file)
+    if category_filter:
+        logger.info(f"카테고리 필터 적용: {len(category_filter)}개 카테고리 제외")
+    else:
+        logger.info("카테고리 필터 없음: 모든 카테고리 크롤링")
+
+    # DB 저장소 사용
+    from crawler.db_storage import PostgresStorage
+    db_storage = PostgresStorage()
+
+    async with OliveyoungCrawler(storage=None, db_storage=db_storage) as crawler:
+        try:
+            # 카테고리 추출
+            all_categories = await crawler.extract_all_category_ids()
+            logger.info(f"전체 카테고리 수: {len(all_categories)}")
+
+            # 카테고리 필터링
+            if category_filter:
+                filter_lower = [name.lower() for name in category_filter]
+                filtered_categories = [
+                    cat for cat in all_categories
+                    if cat["name"].strip().lower() not in filter_lower
+                ]
+                logger.info(f"필터링 후 카테고리 수: {len(filtered_categories)}")
+            else:
+                filtered_categories = all_categories
+
+            total_new_products = 0
+
+            # 카테고리별로 크롤링
+            for i, category in enumerate(filtered_categories, 1):
+                category_id = category["id"]
+                category_name = category["name"]
+
+                logger.info(f"\n[{i}/{len(filtered_categories)}] 카테고리: {category_name} ({category_id})")
+
+                # 카테고리에서 상품 ID 추출
+                goods_no_list = await crawler._extract_goods_no_list_from_category(
+                    category_id, max_items_per_category
+                )
+                logger.info(f"  추출된 상품 수: {len(goods_no_list)}")
+
+                if not goods_no_list:
+                    continue
+
+                # 배치로 새상품 확인 (DB 쿼리)
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT goods_no
+                    FROM crawled_products
+                    WHERE goods_no = ANY(%s) AND site = 'oliveyoung'
+                    """,
+                    (goods_no_list,)
+                )
+                existing = {row[0] for row in cursor.fetchall()}
+                cursor.close()
+
+                new_goods_nos = [gn for gn in goods_no_list if gn not in existing]
+                logger.info(f"  새상품: {len(new_goods_nos)}개 (기존: {len(existing)}개)")
+
+                # 새상품 크롤링 및 즉시 저장
+                for goods_no in new_goods_nos:
+                    try:
+                        product = await crawler.crawl_single_product(goods_no)
+                        if product:
+                            # DB에 즉시 저장 및 커밋
+                            db_storage.save([product])
+                            db_storage.db.commit()
+                            total_new_products += 1
+                            logger.info(f"  ✓ 저장 완료: {goods_no} - {product.get('item_name', 'N/A')}")
+                    except Exception as e:
+                        logger.error(f"  ✗ 실패: {goods_no} - {str(e)}")
+                        continue
+
+                # 카테고리 간 딜레이
+                if i < len(filtered_categories):
+                    logger.info(f"  카테고리 간 딜레이 (5초)...")
+                    await asyncio.sleep(5)
+
+            # 결과 정리
+            logger.info("\n=== Oliveyoung DB 기반 새상품 크롤링 완료 ===")
+            logger.info(f"총 신규 제품: {total_new_products}개")
+
+        except Exception as e:
+            logger.error(f"새상품 크롤링 중 오류: {str(e)}", exc_info=True)
+        finally:
+            conn.close()
 
 
 async def test_new_products_only(existing_excel: str, max_items_per_category: int = 15, use_excel: bool = True, output_filename: str = None, filter_file: str = "category_filter.txt"):
@@ -412,20 +533,20 @@ async def test_full_crawling_flow(max_items_per_category: int = 2, category_filt
         logger.info(f"카테고리 길이 필터: {category_filter_length}자리")
     storage_type = "Excel" if use_excel else "JSON"
     logger.info(f"저장소 타입: {storage_type}")
-    
+
     # 저장소 생성
     storage = create_storage("oliveyoung_products", use_excel)
-    
+
     async with OliveyoungCrawler(storage=storage) as crawler:
         try:
             # 1단계: 메인 페이지에서 모든 카테고리 ID 추출
             logger.info("1단계: 메인 페이지에서 카테고리 ID 추출 중...")
             all_categories = await crawler.extract_all_category_ids()
-            
+
             if not all_categories:
                 logger.error("카테고리 ID를 추출할 수 없습니다")
                 return
-            
+
             # 카테고리 필터링 (옵션)
             if category_filter_length:
                 filtered_categories = []
@@ -435,39 +556,39 @@ async def test_full_crawling_flow(max_items_per_category: int = 2, category_filt
                         filtered_categories.append(cat)
                 logger.info(f"카테고리 필터링: {len(all_categories)}개 → {len(filtered_categories)}개 (길이 {category_filter_length}자리)")
                 all_categories = filtered_categories
-            
+
             if not all_categories:
                 logger.warning("필터링 후 크롤링할 카테고리가 없습니다")
                 return
-            
+
             # 모든 카테고리 사용
             target_categories = all_categories
             category_ids = [cat["id"] if isinstance(cat, dict) else cat for cat in target_categories]
-            
+
             logger.info(f"크롤링 대상 카테고리: {len(target_categories)}개")
             if len(target_categories) <= 10:
                 logger.info(f"카테고리 목록: {', '.join(category_ids)}")
             else:
                 logger.info(f"처음 10개: {', '.join(category_ids[:10])}")
                 logger.info(f"... 및 {len(target_categories) - 10}개 더")
-            
+
             # 2단계: 각 카테고리에서 제품 ID 추출 및 크롤링
             all_products = []
-            
+
             for i, category in enumerate(target_categories, 1):
                 try:
                     category_id = category["id"] if isinstance(category, dict) else category
                     category_name = category.get("name", "Unknown") if isinstance(category, dict) else "Unknown"
-                    
+
                     logger.info(f"2단계: 카테고리 {i}/{len(target_categories)} 처리 중 - {category_id} ({category_name})")
-                    
+
                     # 카테고리에서 제품 크롤링 (crawl_from_category 사용)
                     category_products = await crawler.crawl_from_category(category_id, max_items_per_category)
-                    
+
                     if category_products:
                         all_products.extend(category_products)
                         logger.info(f"카테고리 {category_id}: {len(category_products)}개 제품 크롤링 완료")
-                        
+
                         # 크롤링된 제품 정보 출력 (처음 3개만)
                         for j, product in enumerate(category_products[:3], 1):
                             logger.info(f"  제품 {j}: {product.get('item_name', 'N/A')} - {product.get('price', 'N/A')}")
@@ -475,27 +596,27 @@ async def test_full_crawling_flow(max_items_per_category: int = 2, category_filt
                             logger.info(f"  ... 및 {len(category_products) - 3}개 더")
                     else:
                         logger.warning(f"카테고리 {category_id}: 제품 크롤링 실패")
-                    
+
                     # 카테고리 간 지연
                     if i < len(target_categories):
                         from crawler.utils import random_delay
                         await random_delay(5, 8)
                         logger.info(f"카테고리 간 지연 완료 (다음: {i + 1}/{len(target_categories)})")
-                        
+
                 except Exception as e:
                     logger.error(f"카테고리 {category_id} 처리 중 오류: {str(e)}")
                     continue
-            
+
             # 4단계: 결과 정리
             logger.info("=== Oliveyoung 전체 크롤링 플로우 테스트 완료 ===")
             logger.info(f"총 처리된 카테고리: {len(target_categories)}개")
             logger.info(f"총 크롤링된 제품: {len(all_products)}개")
-            
+
             if all_products:
                 # 결과 저장
                 storage.save(all_products)
                 logger.info(f"결과 저장 완료: {storage.file_path}")
-            
+
         except Exception as e:
             logger.error(f"전체 크롤링 플로우 테스트 실행 중 오류: {str(e)}", exc_info=True)
 
@@ -582,14 +703,26 @@ def main():
         help="기존 크롤링 결과 엑셀 파일 경로 (최신 상품 크롤링 시 사용)",
         default="data/oliveyoung_20250929.xlsx"
     )
+    parser.add_argument(
+        "--crawl-new-from-db",
+        action="store_true",
+        help="DB 기반 새상품 크롤링 (crawled_products 중복 확인)"
+    )
 
     args = parser.parse_args()
-    
+
     # 출력 디렉토리 생성
     Path("data").mkdir(exist_ok=True)
-    
+
     try:
-        if args.test_new_products:
+        if args.crawl_new_from_db:
+            # DB 기반 새상품 크롤링
+            asyncio.run(crawl_new_products_from_db(
+                max_items_per_category=args.max_items,
+                filter_file=args.filter_file
+            ))
+
+        elif args.test_new_products:
             # 최신 상품만 크롤링 테스트
             if not Path(args.existing_excel).exists():
                 logger.error(f"기존 엑셀 파일을 찾을 수 없습니다: {args.existing_excel}")
@@ -617,15 +750,15 @@ def main():
                 use_excel=args.use_excel,
                 output_filename=args.output_filename
             ))
-            
+
         elif args.full_flow:
             # 전체 크롤링 플로우 테스트
             asyncio.run(test_full_crawling_flow(args.max_items, args.category_filter, args.use_excel))
-            
+
         elif args.goods_no:
             # 단일 제품 테스트
             asyncio.run(test_single_product(args.goods_no, args.use_excel))
-            
+
         elif args.category_id:
             if args.test_extraction:
                 # goodsNo 추출만 테스트 (저장소 불필요)
@@ -638,11 +771,11 @@ def main():
             logger.info("기본 Oliveyoung 테스트를 실행합니다...")
             storage_type = "Excel" if args.use_excel else "JSON"
             logger.info(f"저장소 타입: {storage_type}")
-            
+
             # 예시 goodsNo로 테스트 (실제 존재하는 상품 번호로 교체 필요)
             test_goods_no = "A000000192405"  # 예시 goodsNo
             asyncio.run(test_single_product(test_goods_no, args.use_excel))
-            
+
     except KeyboardInterrupt:
         logger.info("사용자에 의해 테스트가 중단되었습니다.")
     except Exception as e:

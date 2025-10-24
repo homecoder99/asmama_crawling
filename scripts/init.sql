@@ -169,14 +169,33 @@ COMMENT ON COLUMN crawled_products.option_info IS '옵션 정보 (||* 구분자)
 COMMENT ON COLUMN crawled_products.category_detail_id IS 'float64 scientific notation 방지용 VARCHAR';
 
 -- ============================================================================
--- 4. REGISTERED_PRODUCTS TABLE (EXCLUDED - 엑셀 파일로 유지)
+-- 4. UPLOAD_HISTORY TABLE
 -- ============================================================================
--- Note: registered_products는 DB 테이블로 만들지 않음
--- Reason: 유저별로 분리된 파일 관리 필요 (registered/registered.xlsx)
--- 각 유저가 중복으로 상품을 올릴 수 있기 때문에 공유 DB 테이블 부적합
+-- Purpose: 사용자별 Qoo10 업로드 이력 추적 (중복 방지용)
+
+CREATE TABLE upload_history (
+    id SERIAL PRIMARY KEY,
+    crawled_product_id INTEGER NOT NULL REFERENCES crawled_products(id),
+    uploaded_by VARCHAR(100) NOT NULL,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_upload_history_product_id ON upload_history(crawled_product_id);
+CREATE INDEX idx_upload_history_uploaded_by ON upload_history(uploaded_by);
+CREATE INDEX idx_upload_history_user_product ON upload_history(uploaded_by, crawled_product_id);
+CREATE INDEX idx_upload_history_uploaded_at ON upload_history(uploaded_at DESC);
+
+COMMENT ON TABLE upload_history IS '사용자별 Qoo10 업로드 이력 (중복 방지)';
+COMMENT ON COLUMN upload_history.uploaded_by IS '업로드 유저 식별자';
+COMMENT ON COLUMN upload_history.crawled_product_id IS '크롤링 원본 데이터 참조';
 
 -- ============================================================================
--- 5. QOO10_PRODUCTS TABLE
+-- 5. REGISTERED_PRODUCTS TABLE (DEPRECATED - upload_history로 대체)
+-- ============================================================================
+-- Note: registered/registered.xlsx는 레거시로 유지
+
+-- ============================================================================
+-- 6. QOO10_PRODUCTS TABLE
 -- ============================================================================
 -- Purpose: Qoo10 업로드용으로 변환된 상품 데이터 (48개 칼럼)
 -- Source: Transformed from crawled_products via uploader/oliveyoung_uploader.py

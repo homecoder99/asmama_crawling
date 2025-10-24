@@ -57,7 +57,7 @@ def save_category_file(filepath: str, categories: list[str]):
 
 def run_command_streaming(cmd: list[str], task_id: str) -> Generator[str, None, None]:
     """
-    셸 명령어를 실행하고 실시간으로 출력을 스트리밍
+    셸 명령어를 실행하고 실시간으로 출력을 스트리��
 
     Args:
         cmd: 실행할 명령어 리스트
@@ -244,7 +244,7 @@ def oliveyoung_crawl(max_items: int, output_filename: str, save_to_db: bool, sel
         else:
             # 모든 카테고리 선택됨 (빈 필터)
             save_category_file("category_filter.txt", [])
-            yield f"📋 모든 카테고리를 크롤링합니다.\n\n"
+            yield f"📋 모든 카테고리를 크롤��합니다.\n\n"
 
         env_vars = {
             "MAX_ITEMS": str(max_items),
@@ -360,6 +360,46 @@ def upload_celeb():
         yield output
 
 
+def oliveyoung_crawl_new_from_db(max_items: int, selected_categories: list):
+    """DB 기반 새상품 크롤링 (crawled_products 중복 확인)"""
+    import shutil
+
+    # 원본 category_filter.txt 백업
+    backup_file = ".category_filter_backup.txt"
+    if os.path.exists("category_filter.txt"):
+        shutil.copy("category_filter.txt", backup_file)
+
+    try:
+        # 체크 안 된 카테고리 = 제외할 카테고리
+        excluded_categories = [cat for cat in all_categories if cat not in selected_categories]
+
+        if excluded_categories:
+            save_category_file("category_filter.txt", excluded_categories)
+            yield f"📋 {len(selected_categories)}개 카테고리를 크롤링합니다 ({len(excluded_categories)}개 제외).\n\n"
+        else:
+            # 모든 카테고리 선택됨 (빈 필터)
+            save_category_file("category_filter.txt", [])
+            yield f"📋 모든 카테고리를 크롤링합니다.\n\n"
+
+        # Python 스크립트 직접 실행
+        cmd = [
+            "python",
+            "playground/test_oliveyoung_crawler.py",
+            "--crawl-new-from-db",
+            f"--max-items={max_items}"
+        ]
+
+        task_id = f"oliveyoung_crawl_new_db_{int(time.time())}"
+        for output in run_command_streaming(cmd, task_id):
+            yield output
+
+    finally:
+        # 원본 category_filter.txt 복원
+        if os.path.exists(backup_file):
+            shutil.copy(backup_file, "category_filter.txt")
+            os.remove(backup_file)
+
+
 # 전체 카테고리 목록 로드
 all_categories = read_category_file("all_categories.txt")
 excluded_categories = read_category_file("category_filter.txt")
@@ -398,11 +438,30 @@ with gr.Blocks(title="크롤러 컨트롤 패널", theme=gr.themes.Soft()) as de
             gr.Markdown("### 카테고리 필터 설정")
             gr.Markdown("크롤링할 카테고리를 선택하세요. (기본값: category_filter.txt)")
 
+            with gr.Row():
+                select_all_btn = gr.Button("전체 선택", scale=1)
+                select_default_btn = gr.Button("기본값으로", scale=1)
+                deselect_all_btn = gr.Button("전체 해제", scale=1)
+
             category_selector = gr.CheckboxGroup(
                 choices=all_categories,
                 value=default_categories,
                 label="크롤링할 카테고리 선택",
                 info="✅ 체크된 카테고리만 크롤링됩니다 (체크 안 된 것은 제외)"
+            )
+
+            # 버튼 이벤트 핸들러
+            select_all_btn.click(
+                lambda: gr.CheckboxGroup(value=all_categories),
+                outputs=category_selector
+            )
+            select_default_btn.click(
+                lambda: gr.CheckboxGroup(value=default_categories),
+                outputs=category_selector
+            )
+            deselect_all_btn.click(
+                lambda: gr.CheckboxGroup(value=[]),
+                outputs=category_selector
             )
 
             gr.Markdown("---")
@@ -428,7 +487,27 @@ with gr.Blocks(title="크롤러 컨트롤 패널", theme=gr.themes.Soft()) as de
             )
 
             gr.Markdown("---")
-            gr.Markdown("### 최신 상품만 크롤링")
+            gr.Markdown("### 새상품 크롤링 (DB 기반)")
+            gr.Markdown("crawled_products 테이블에서 중복을 확인하여 새상품만 크롤링합니다.")
+            oy_db_max_items = gr.Number(label="카테고리당 최대 아이템 수", value=15, precision=0)
+            with gr.Row():
+                oy_db_crawl_btn = gr.Button("DB 기반 새상품 크롤링 시작", variant="primary", scale=4)
+                oy_db_stop_btn = gr.Button("중지", variant="stop", scale=1)
+            oy_db_crawl_output = gr.Textbox(label="실행 결과", lines=15, max_lines=30, autoscroll=True)
+
+            oy_db_crawl_btn.click(
+                oliveyoung_crawl_new_from_db,
+                inputs=[oy_db_max_items, category_selector],
+                outputs=oy_db_crawl_output,
+                show_progress="full"
+            )
+            oy_db_stop_btn.click(
+                lambda: stop_process("oliveyoung_crawl_new_db"),
+                outputs=oy_db_crawl_output
+            )
+
+            gr.Markdown("---")
+            gr.Markdown("### 최신 상품만 크롤링 (Excel 기반)")
             with gr.Row():
                 oy_existing_excel = gr.Textbox(label="기존 Excel 파일 경로", value="data/oliveyoung_20250929.xlsx")
                 oy_new_max_items = gr.Number(label="카테고리당 최대 아이템 수", value=15, precision=0)
@@ -473,67 +552,67 @@ with gr.Blocks(title="크롤러 컨트롤 패널", theme=gr.themes.Soft()) as de
                 outputs=oy_upload_output
             )
 
-        # Asmama 크롤링 탭
-        with gr.Tab("🏪 Asmama 크롤링"):
-            gr.Markdown("### 베스트셀러 페이지 크롤링")
-            asmama_url = gr.Textbox(
-                label="리스트 페이지 URL",
-                value="http://www.asmama.com/shop/bestseller.html?xcode=REVIEW",
-                placeholder="http://www.asmama.com/shop/bestseller.html?xcode=REVIEW"
-            )
-            with gr.Row():
-                asmama_crawl_btn = gr.Button("크롤링 시작", variant="primary", scale=4)
-                asmama_stop_btn = gr.Button("중지", variant="stop", scale=1)
-            asmama_crawl_output = gr.Textbox(label="실행 결과", lines=15, max_lines=30, autoscroll=True)
+        # # Asmama 크롤링 탭
+        # with gr.Tab("🏪 Asmama 크롤링"):
+        #     gr.Markdown("### 베스트셀러 페이지 크롤링")
+        #     asmama_url = gr.Textbox(
+        #         label="리스트 페이지 URL",
+        #         value="http://www.asmama.com/shop/bestseller.html?xcode=REVIEW",
+        #         placeholder="http://www.asmama.com/shop/bestseller.html?xcode=REVIEW"
+        #     )
+        #     with gr.Row():
+        #         asmama_crawl_btn = gr.Button("크롤링 시작", variant="primary", scale=4)
+        #         asmama_stop_btn = gr.Button("중지", variant="stop", scale=1)
+        #     asmama_crawl_output = gr.Textbox(label="실행 결과", lines=15, max_lines=30, autoscroll=True)
 
-            asmama_crawl_btn.click(
-                asmama_crawl,
-                inputs=asmama_url,
-                outputs=asmama_crawl_output,
-                show_progress="full"
-            )
-            asmama_stop_btn.click(
-                lambda: stop_process("asmama_crawl"),
-                outputs=asmama_crawl_output
-            )
+        #     asmama_crawl_btn.click(
+        #         asmama_crawl,
+        #         inputs=asmama_url,
+        #         outputs=asmama_crawl_output,
+        #         show_progress="full"
+        #     )
+        #     asmama_stop_btn.click(
+        #         lambda: stop_process("asmama_crawl"),
+        #         outputs=asmama_crawl_output
+        #     )
 
-        # 셀럽 검증 탭
-        with gr.Tab("⭐ 셀럽 검증"):
-            gr.Markdown("### 데이터 검증 및 업로드 변환")
+        # # 셀럽 검증 탭
+        # with gr.Tab("⭐ 셀럽 검증"):
+        #     gr.Markdown("### 데이터 검증 및 업로드 변환")
 
-            gr.Markdown("#### 1. 셀럽 정보 필수 검증")
-            with gr.Row():
-                validate_btn = gr.Button("검증 실행", variant="primary", scale=4)
-                validate_stop_btn = gr.Button("중지", variant="stop", scale=1)
-            validate_output = gr.Textbox(label="검증 결과", lines=15, max_lines=30, autoscroll=True)
+        #     gr.Markdown("#### 1. 셀럽 정보 필수 검증")
+        #     with gr.Row():
+        #         validate_btn = gr.Button("검증 실행", variant="primary", scale=4)
+        #         validate_stop_btn = gr.Button("중지", variant="stop", scale=1)
+        #     validate_output = gr.Textbox(label="검증 결과", lines=15, max_lines=30, autoscroll=True)
 
-            validate_btn.click(
-                validate_celeb,
-                outputs=validate_output,
-                show_progress="full"
-            )
-            validate_stop_btn.click(
-                lambda: stop_process("validate_celeb"),
-                outputs=validate_output
-            )
+        #     validate_btn.click(
+        #         validate_celeb,
+        #         outputs=validate_output,
+        #         show_progress="full"
+        #     )
+        #     validate_stop_btn.click(
+        #         lambda: stop_process("validate_celeb"),
+        #         outputs=validate_output
+        #     )
 
-            gr.Markdown("---")
+        #     gr.Markdown("---")
 
-            gr.Markdown("#### 2. 검증된 데이터 업로드 변환")
-            with gr.Row():
-                upload_btn = gr.Button("업로드 변환 실행", variant="primary", scale=4)
-                upload_stop_btn = gr.Button("중지", variant="stop", scale=1)
-            upload_output = gr.Textbox(label="변환 결과", lines=15, max_lines=30, autoscroll=True)
+        #     gr.Markdown("#### 2. 검증된 데이터 업로드 변환")
+        #     with gr.Row():
+        #         upload_btn = gr.Button("업로드 변환 실행", variant="primary", scale=4)
+        #         upload_stop_btn = gr.Button("중지", variant="stop", scale=1)
+        #     upload_output = gr.Textbox(label="변환 결과", lines=15, max_lines=30, autoscroll=True)
 
-            upload_btn.click(
-                upload_celeb,
-                outputs=upload_output,
-                show_progress="full"
-            )
-            upload_stop_btn.click(
-                lambda: stop_process("upload_celeb"),
-                outputs=upload_output
-            )
+        #     upload_btn.click(
+        #         upload_celeb,
+        #         outputs=upload_output,
+        #         show_progress="full"
+        #     )
+        #     upload_stop_btn.click(
+        #         lambda: stop_process("upload_celeb"),
+        #         outputs=upload_output
+        #     )
 
     gr.Markdown("---")
     gr.Markdown("### 💡 사용 팁")
