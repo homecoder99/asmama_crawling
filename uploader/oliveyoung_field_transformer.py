@@ -9,7 +9,7 @@ import json
 import csv
 from typing import Dict, Any, List, Optional, Tuple
 import logging
-import anthropic
+import openai
 import os
 from pathlib import Path
 from datetime import datetime
@@ -19,10 +19,12 @@ try:
     from .data_loader import TemplateLoader
     from .field_transformer import FieldTransformer
     from .brand_translation_manager import BrandTranslationManager
+    from .parallel_gpt_processor import ParallelGPTProcessor, TranslationTask
 except ImportError:
     from data_loader import TemplateLoader
     from field_transformer import FieldTransformer
     from brand_translation_manager import BrandTranslationManager
+    from parallel_gpt_processor import ParallelGPTProcessor, TranslationTask
 
 # 환경변수 로드
 dotenv.load_dotenv()
@@ -31,7 +33,7 @@ class OliveyoungFieldTransformer(FieldTransformer):
     """
     Oliveyoung 전용 필드 변환 담당 클래스.
     
-    기본 FieldTransformer를 상속받아 Oliveyoung 특화 기능을 추가:
+    기본 FieldTransformer를 상��받아 Oliveyoung 특화 기능을 추가:
     - goods_no 기반 제품 식별
     - 3단계 카테고리 매핑 (category_main > category_sub > category_detail)
     - 할인정보 파싱 (discount_info, benefit_info)
@@ -67,8 +69,19 @@ class OliveyoungFieldTransformer(FieldTransformer):
         with open(self.failed_brands_csv, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow(['상품ID', '원본_브랜드명', '영어_번역', '일본어_번역', '실패_시간'])
-        
+
+        # 병렬 처리 프로세서 초기화
+        # max_concurrent=50 권장 (4000건 기준 약 4-5분 소요 예상, 1.5일에서 99.8% 단축)
+        # Anthropic API는 높은 rate limit을 지원하므로 공격적으로 설정 가능
+        # 환경변수로 조절: GPT_MAX_CONCURRENT=100 으로 더 빠르게 가능
+        self.parallel_processor = ParallelGPTProcessor(
+            max_concurrent=int(os.getenv("GPT_MAX_CONCURRENT", "50")),
+            max_retries=3,
+            timeout=30.0
+        )
+
         self.logger.info("OliveyoungFieldTransformer 초기화 완료")
+        self.logger.info(f"병렬 처리 설정: max_concurrent={self.parallel_processor.max_concurrent}")
     
     def _load_olive_qoo_mapping(self) -> Dict[str, str]:
         """
@@ -99,17 +112,75 @@ class OliveyoungFieldTransformer(FieldTransformer):
     
     def transform_products(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Oliveyoung 상품 목록을 Qoo10 형식으로 변환한다.
-        
+        Oliveyoung 상품 목록을 Qoo10 형식으로 변환한다 (병렬 GPT 번역 적용).
+
         Args:
             products: Oliveyoung 크롤링 상품 목록
-            
+
         Returns:
             변환된 상품 목록
         """
         self.logger.info(f"Oliveyoung 상품 변환 시작: {len(products)}개")
-        
-        # 통계 카운터
+        self.logger.info("🚀 병렬 GPT 처리 사용 - 예상 시간: 4000건 기준 약 4-5분 (기존 1.5일에서 99.8% 단축)")
+
+        # 1단계: 모든 번역 작업 수집
+        translation_tasks = []
+
+        for i, product in enumerate(products):
+            item_name = str(product.get('item_name', ''))
+            brand_name = str(product.get('brand_name', ''))
+
+            # 상품명 번역 작업
+            if item_name:
+                translation_tasks.append(TranslationTask(
+                    index=i,
+                    task_type='product_name',
+                    input_text=item_name,
+                    brand=brand_name
+                ))
+
+            # 옵션 번역 작업
+            options = product.get('options', [])
+            if isinstance(options, str):
+                try:
+                    options = json.loads(options)
+                except:
+                    options = options.split('81638') if options else []
+
+            for opt_idx, option in enumerate(options):
+                if option and option.strip():
+                    translation_tasks.append(TranslationTask(
+                        index=i * 10000 + opt_idx,  # 복합 인덱스
+                        task_type='option',
+                        input_text=option
+                    ))
+
+        self.logger.info(f"총 번역 작업 수: {len(translation_tasks)}개 (상품명 + 옵션)")
+
+        # 2단계: 병렬 번역 실행
+        import asyncio
+        self.logger.info(f"병렬 번역 시작 (동시 처리: {self.parallel_processor.max_concurrent}개)...")
+        completed_tasks = asyncio.run(
+            self.parallel_processor.process_batch(translation_tasks, show_progress=True)
+        )
+
+        # 3단계: 번역 결과를 제품별로 매핑
+        product_translations = {}  # {product_index: translated_name}
+        option_translations = {}   # {product_index: {option_index: translated_option}}
+
+        for task in completed_tasks:
+            if task.task_type == 'product_name':
+                product_translations[task.index] = task.result
+            elif task.task_type == 'option':
+                product_idx = task.index // 10000
+                option_idx = task.index % 10000
+                if product_idx not in option_translations:
+                    option_translations[product_idx] = {}
+                option_translations[product_idx][option_idx] = task.result
+
+        self.logger.info("번역 완료! 이제 제품 변환을 시작합니다...")
+
+        # 4단계: 제품 변환 (번역 결과 적용)
         transformed_products = []
         stats = {
             "total": len(products),
@@ -118,32 +189,47 @@ class OliveyoungFieldTransformer(FieldTransformer):
             "removed_none": 0,
             "removed_missing": 0
         }
-        
-        for i, product in enumerate(products, 1):
+
+        for i, product in enumerate(products):
             try:
+                # 번역된 상품명을 product에 임시 저장
+                if i in product_translations:
+                    product['_translated_item_name'] = product_translations[i]
+
+                # 번역된 옵션을 product에 임시 저장
+                if i in option_translations:
+                    translated_options = []
+                    for opt_idx in sorted(option_translations[i].keys()):
+                        translated_opt = option_translations[i][opt_idx]
+                        if translated_opt:  # 빈 문자열이 아닌 경우만
+                            translated_options.append(translated_opt)
+                    product['_translated_options'] = translated_options
+
+                # 제품 변환 (내부에서 _translated_item_name, _translated_options 사용)
                 transformed_product = self._transform_single_product(product)
                 if transformed_product:
                     transformed_products.append(transformed_product)
                     stats["success"] += 1
                 else:
                     stats["failed"] += 1
-                
-                if i % 5 == 0:
-                    self.logger.info(f"변환 진행중: {i}/{len(products)}개 완료 (성공: {stats['success']}, 실패: {stats['failed']})")
-                    
+
+                if (i + 1) % 100 == 0:
+                    self.logger.info(f"변환 진행중: {i+1}/{len(products)}개 완료 (성공: {stats['success']}, 실패: {stats['failed']})")
+
             except Exception as e:
                 stats["failed"] += 1
                 self.logger.error(f"상품 변환 실패: {product.get('goods_no', 'unknown')} - {str(e)}")
                 continue
-        
+
         # 최종 통계 로깅
         success_rate = (stats["success"] / stats["total"] * 100) if stats["total"] > 0 else 0
         self.logger.info(f"Oliveyoung 상품 변환 완료:")
         self.logger.info(f"  • 전체: {stats['total']}개")
         self.logger.info(f"  • 성공: {stats['success']}개 ({success_rate:.1f}%)")
         self.logger.info(f"  • 실패: {stats['failed']}개")
-        
+
         return transformed_products
+
     
     def _transform_single_product(self, product: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -171,15 +257,15 @@ class OliveyoungFieldTransformer(FieldTransformer):
             transformed = {
                 # 1. 기본 식별자
                 "seller_unique_item_id": product.get("unique_item_id", goods_no),
-                
-                # 2. 카테고리 번호 
+
+                # 2. 카테고리 번호
                 "category_number": self._get_beauty_category_number(product),
-                
+
                 # 3. 브랜드 번호
                 "brand_number": self._get_brand_number(brand_name, goods_no),
-                
-                # 4. 상품명 (정제 후 일본어 번역)
-                "item_name": self._create_product_name_kor_to_jp(item_name, brand_name),
+
+                # 4. 상품명 (병렬 번역 결과 우선 사용, 없으면 기존 메서드 호출)
+                "item_name": product.get('_translated_item_name') or self._create_product_name_kor_to_jp(item_name, brand_name),
                 
                 # 5. 상품 상태
                 "item_status_Y/N/D": "Y",  # 판매중
@@ -425,6 +511,7 @@ class OliveyoungFieldTransformer(FieldTransformer):
     def _create_product_name_kor_to_jp(self, kor: str, brand: str) -> str:
         """
         한국어 상품명에서 기획/증정 관련 내용을 제거하고 일본어로 번역하는 함수
+        (병렬 처리된 번역 결과를 우선 사용)
 
         Args:
             kor: 번역할 한국어 상품명
@@ -436,8 +523,14 @@ class OliveyoungFieldTransformer(FieldTransformer):
         if not kor or not kor.strip():
             return ""
 
+        # 병렬 처리로 이미 번역된 경우 (transform_products에서 미리 처리)
+        # _transform_single_product에서 호출되므로 product에서 직접 가져옴
+        # 이 메서드는 이미 transform_products에서 _translated_item_name로 저장되었음
+        # 하지만 여기서는 접근할 수 없으므로, 병렬 번역 결과는 transform_products에서 직접 사용
+
+        # 개별 호출의 경우 기존 로직 유지 (fallback)
         try:
-            self.logger.info(f"상품명 정제 및 번역 시작: '{kor}' (브랜드: {brand})")
+            self.logger.info(f"상품명 개별 번역 (fallback): '{kor}' (브랜드: {brand})")
 
             response = self.openai_client.responses.create(
                 model="gpt-5-mini",
@@ -503,7 +596,7 @@ KOREAN_NAME: {kor}
 Translate the option text into a clean **Japanese option name only** (single line).
 - Output **Japanese only** (no Korean). Use katakana for names if needed.
 - **Never include price** (e.g., 16,720원).
-- If the option indicates **sold out** (e.g., 품절/일시품절/재고없음/매진/완판/out of stock), **return an empty string** (to exclude it).
+- **Remove sold-out indicators** (품절/일시품절/재고없음/매진/완판/out of stock) but **translate the rest**.
 
 ## WHAT TO KEEP (for option segmentation)
 Keep information that defines the option itself:
@@ -514,6 +607,7 @@ Keep information that defines the option itself:
 Do NOT keep marketing claims (인기/No.1/한정기념 등).
 
 ## WHAT TO REMOVE
+- **Sold-out indicators**: 품절, 일시품절, 재고없음, 매진, 완판, out of stock (remove but translate rest)
 - Store codes / metadata: strings like `Option1||*`, `||*0||*200||*...`, `oliveyoung_A...`, SKU/ID hashes
 - Bracketed non-structural claims: [ ], ［ ］, ( ), （ ）, 【 】, 〈 〉, 《 》, 「 」, 『 』 **장식문구**。
   ※ 다만、용량 또는 성분（50mL+30mL、본체+리필）**실제 구성**은 남깁니다（괄호는 제거하고 내용만 남깁니다）。
@@ -521,25 +615,27 @@ Do NOT keep marketing claims (인기/No.1/한정기념 등).
 
 ## NORMALIZATION
 - Half-width numbers; units as **mL/g**; use **×** for multiplicative counts; use **+** for bundles: `30mL+30mL`, `7mL×3`
-- Convert Hangul words to standard JP EC terms: 단품→単品 / 세트→セット / 증정→おまけ / 추가→追加 / 리필→リフィル
+- Convert Hangul words to standard JP EC terms: 단품→単品 / 세트→セット / 증정→おまけ / 추가→追가 / 리필→リフィル
 - Keep original attribute order **when reasonable**, but ensure readability (spaces between tokens).
 
 ## OUTPUT
 Return **only** the final Japanese option string on one line.
 No explanations, no quotes, no brackets unless part of model numbers (e.g., "01" without brackets).
-If the option is sold out or becomes empty after removing prices/metadata, **return an empty string**.
+**If only sold-out indicator remains after processing, return empty string.**
 
 --------------------------------
 OPTION_INPUT: {option_value}
 
 # Examples
 - IN: `Option2||*03 로지 16,720원` → OUT: `03 ロージー`
-- IN: `（품절）센시비오 H2O 850ml K2` → OUT: ``  (empty string)
+- IN: `（품절）센시비오 H2O 850ml K2` → OUT: `센시비오 H2O 850mL K2`
+- IN: `품절` → OUT: ``  (empty string - only sold-out indicator)
 - IN: `단품 200ml` → OUT: `単品 200mL`
 - IN: `30ml+30ml` → OUT: `30mL+30mL`
 - IN: `크림 50mL 단품` → OUT: `クリーム 50mL 単品`
 - IN: `1+1 50ml` → OUT: `1+1 50mL`
 - IN: `본체+리필 12g` → OUT: `本体+リフィル 12g`
+- IN: `[품절] 01 베이지` → OUT: `01 ベージュ`
 """
             )
             

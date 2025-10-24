@@ -7,7 +7,7 @@
 import re
 from typing import Dict, Any, List, Optional, Tuple
 import logging
-import anthropic
+import openai
 import os
 import dotenv
 
@@ -16,36 +16,50 @@ try:
 except ImportError:
     from data_loader import TemplateLoader
 
+try:
+    import psycopg2
+    PSYCOPG2_AVAILABLE = True
+except ImportError:
+    PSYCOPG2_AVAILABLE = False
+
 # 환경변수 로드
 dotenv.load_dotenv()
 
 class ProductFilter:
     """
     상품 필터링 담당 클래스.
-    
+
     금지 브랜드/경고 키워드 검증, 기등록 상품 검증, 이미지 필터링 결과를 통해
     업로드 가능한 상품만 선별한다. 경고 키워드가 있으면 AI로 상품명을 수정한다.
     """
-    
-    def __init__(self, template_loader: TemplateLoader):
+
+    def __init__(self, template_loader: TemplateLoader, uploaded_by: Optional[str] = None):
         """
         ProductFilter 초기화.
-        
+
         Args:
             template_loader: 로딩된 템플릿 데이터
+            uploaded_by: 유저 식별자 (upload_history 조회용, None이면 레거시 방식 사용)
         """
         self.logger = logging.getLogger(__name__)
         self.template_loader = template_loader
-        
-        # Claude 클라이언트 초기화 (상품명 수정용)
-        self.claude_client = anthropic.Anthropic(
-            api_key=os.getenv("ANTHROPIC_API_KEY")
+        self.uploaded_by = uploaded_by
+
+        # OpenAI 클라이언트 초기화 (상품명 수정용)
+        self.openai_client = openai.OpenAI(
+            api_key=os.getenv("OPENAI_API_KEY")
         )
-        
+
+        # DB 연결 (upload_history 조회용)
+        self.db_conn = None
+        if uploaded_by and PSYCOPG2_AVAILABLE:
+            self._init_db_connection()
+
         # 캐시
         self._warning_keywords_cache = None
         self._ban_brands_cache = None
         self._registered_branduids_cache = None
+        self._uploaded_product_ids_cache = None
     
     def filter_products(self, products: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
@@ -310,32 +324,26 @@ class ProductFilter:
             original_name = product.get("item_name", "")
             category = product.get("category_name", "")
             
-            response = self.claude_client.messages.create(
-                model="claude-3-7-sonnet-20250219",
-                max_tokens=100,
-                temperature=0.3,
-                system="""당신은 온라인 쇼핑몰 상품명 수정 전문가입니다. 
+            response = self.openai_client.responses.create(
+                model="gpt-5-mini",
+                input=f"""당신은 온라인 쇼핑몰 상품명 수정 전문가입니다.
 경고 키워드(의학적 표현, 홍보성 광고 문구)가 포함된 상품명을 자연스럽게 수정해주세요.
 
 규칙:
 1. 경고 키워드를 제거하거나 순화된 표현으로 변경
-2. 상품의 본질적 특성은 유지
+2. 상품의 본질적 특��은 유지
 3. 자연스럽고 매력적인 표현 사용
 4. 한국어로 응답
-5. 상품명만 응답 (설명 없음)""",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"""상품명: "{original_name}"
+5. 상품명만 응답 (설명 없음)
+
+상품명: "{original_name}"
 카테고리: "{category}"
 경고 키워드: "{warning_keyword}"
 
 위 상품명에서 경고 키워드를 제거하거나 순화하여 새로운 상품명을 만들어주세요."""
-                    }
-                ]
             )
-            
-            modified_name = response.content[0].text.strip()
+
+            modified_name = response.output_text.strip()
             
             # 수정된 상품 데이터 반환
             modified_product = product.copy()
@@ -350,24 +358,70 @@ class ProductFilter:
             self.logger.error(f"상품명 수정 실패: {product.get('branduid')} - {str(e)}")
             return None
     
+    def _init_db_connection(self):
+        """DB 연결을 초기화한다."""
+        try:
+            connection_string = os.getenv("DATABASE_URL")
+            if not connection_string:
+                self.logger.warning("DATABASE_URL 환경변수가 없습니다. 레거시 방식(Excel) 사용")
+                return
+
+            self.db_conn = psycopg2.connect(connection_string)
+            self.logger.info(f"upload_history DB 연결 성공 (user: {self.uploaded_by})")
+        except Exception as e:
+            self.logger.error(f"DB 연결 실패: {str(e)}, 레거시 방식(Excel) 사용")
+            self.db_conn = None
+
+    def _get_uploaded_product_ids_from_db(self) -> set:
+        """
+        upload_history에서 해당 유저가 이미 업로드한 crawled_product_id 목록을 조회한다.
+
+        Returns:
+            업로드한 crawled_product_id set
+        """
+        if not self.db_conn or not self.uploaded_by:
+            return set()
+
+        try:
+            with self.db_conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT DISTINCT cp.unique_item_id
+                    FROM upload_history uh
+                    JOIN crawled_products cp ON uh.crawled_product_id = cp.id
+                    WHERE uh.uploaded_by = %s
+                """, (self.uploaded_by,))
+
+                rows = cursor.fetchall()
+                return {row[0] for row in rows}
+        except Exception as e:
+            self.logger.error(f"upload_history 조회 실패: {str(e)}")
+            return set()
+
     def _is_already_registered(self, product: Dict[str, Any]) -> bool:
         """
         이미 등록된 상품인지 확인한다 (unique_item_id 기준).
-        
+
+        DB 연결이 있으면 upload_history 조회, 없으면 레거시 방식(Excel) 사용.
+
         Args:
             product: 상품 데이터
-            
+
         Returns:
             기등록 상품 여부
         """
-        if self._registered_branduids_cache is None:
-            self._registered_branduids_cache = self.template_loader.get_registered_unique_item_ids()
-        
         unique_item_id = str(product.get("unique_item_id", "")).strip()
-        print(unique_item_id[0])
         if not unique_item_id:
             return False
-        
+
+        # DB 방식 (upload_history 테이블)
+        if self.db_conn and self.uploaded_by:
+            if self._uploaded_product_ids_cache is None:
+                self._uploaded_product_ids_cache = self._get_uploaded_product_ids_from_db()
+            return unique_item_id in self._uploaded_product_ids_cache
+
+        # 레거시 방식 (registered.xlsx)
+        if self._registered_branduids_cache is None:
+            self._registered_branduids_cache = self.template_loader.get_registered_unique_item_ids()
         return unique_item_id in self._registered_branduids_cache
     
     def _is_valid_category(self, product: Dict[str, Any]) -> bool:
@@ -488,7 +542,7 @@ class ProductFilter:
         success_rate = (filtered / total * 100) if total > 0 else 0
         
         summary.append(f"📊 전체 통계:")
-        summary.append(f"  총 상품 수: {total:,}개")
+        summary.append(f"  총 상품 ��: {total:,}개")
         summary.append(f"  통과 상품 수: {filtered:,}개")
         summary.append(f"  제거 상품 수: {removed:,}개")
         summary.append(f"  수정 상품 수: {modified:,}개")
