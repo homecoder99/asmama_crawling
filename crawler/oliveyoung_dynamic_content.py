@@ -369,7 +369,7 @@ class OliveyoungDynamicContentExtractor:
     async def extract_all_dynamic_content(self, page: Page, product_data: Dict[str, Any]):
         """모든 동적 콘텐츠 추출."""
         # 증정품 정보 추출
-        await self.gift_extractor.extract_gift_info(page, product_data)
+        # await self.gift_extractor.extract_gift_info(page, product_data)
         
         # 상품 옵션 정보 추출
         await self.option_extractor.extract_option_info(page, product_data)
