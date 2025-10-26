@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 from .utils import clean_text
 from .oliveyoung_category_mapper import OliveyoungCategoryDetector, OliveyoungCategoryMapper
+from .utils import random_delay
 
 
 class OliveyoungGiftExtractor:
@@ -30,7 +31,7 @@ class OliveyoungGiftExtractor:
                 # 증정품 팝업 로딩 대기
                 try:
                     await page.wait_for_selector('.layer_gift_details', timeout=5000)
-                    await asyncio.sleep(2)  # 추가 로딩 대기
+                    await random_delay(0.25, 0.5)
                     
                     # 증정품 그룹들 추출
                     gift_groups = page.locator('.gifts_detail_group')
@@ -154,8 +155,8 @@ class OliveyoungOptionExtractor:
                 # API 응답 또는 DOM 로딩 대기
                 try:
                     await page.wait_for_selector('#option_list li', timeout=8000)
-                    await asyncio.sleep(2)
-                    
+                    await random_delay(0.25, 0.5)
+
                     # DOM에서 옵션 정보 추출
                     option_items = page.locator('#option_list li')
                     item_count = await option_items.count()
@@ -286,7 +287,7 @@ class OliveyoungDetailInfoExtractor:
                 # DOM 로딩 대기
                 try:
                     await page.wait_for_selector('#artcInfo .detail_info_list', timeout=8000)
-                    await asyncio.sleep(2)
+                    await random_delay(0.25, 0.5)
                     
                     # DOM에서 상품정보제공고시 추출
                     detail_items = page.locator('#artcInfo .detail_info_list')
