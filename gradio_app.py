@@ -435,100 +435,141 @@ with gr.Blocks(title="크롤러 컨트롤 패널", theme=gr.themes.Soft()) as de
 
         # Oliveyoung 크롤링 탭
         with gr.Tab("🛍️ Oliveyoung 크롤링"):
-            gr.Markdown("### 카테고리 필터 설정")
-            gr.Markdown("크롤링할 카테고리를 선택하세요. (기본값: category_filter.txt)")
+            with gr.Tabs():
+                # 전체 크롤링 탭
+                with gr.Tab("전체 크롤링"):
+                    with gr.Accordion("📋 카테고리 선택", open=False):
+                        gr.Markdown("크롤링할 카테고리를 선택하세요.")
+                        with gr.Row():
+                            select_all_full = gr.Button("전체 선택", scale=1)
+                            select_default_full = gr.Button("기본값으로", scale=1)
+                            deselect_all_full = gr.Button("전체 해제", scale=1)
 
-            with gr.Row():
-                select_all_btn = gr.Button("전체 선택", scale=1)
-                select_default_btn = gr.Button("기본값으로", scale=1)
-                deselect_all_btn = gr.Button("전체 해제", scale=1)
+                        category_full = gr.CheckboxGroup(
+                            choices=all_categories,
+                            value=default_categories,
+                            label="크롤링할 카테고리",
+                            info="✅ 체크된 카테고리만 크롤링됩니다"
+                        )
 
-            category_selector = gr.CheckboxGroup(
-                choices=all_categories,
-                value=default_categories,
-                label="크롤링할 카테고리 선택",
-                info="✅ 체크된 카테고리만 크롤링됩니다 (체크 안 된 것은 제외)"
-            )
+                        select_all_full.click(
+                            lambda: gr.CheckboxGroup(value=all_categories),
+                            outputs=category_full
+                        )
+                        select_default_full.click(
+                            lambda: gr.CheckboxGroup(value=default_categories),
+                            outputs=category_full
+                        )
+                        deselect_all_full.click(
+                            lambda: gr.CheckboxGroup(value=[]),
+                            outputs=category_full
+                        )
 
-            # 버튼 이벤트 핸들러
-            select_all_btn.click(
-                lambda: gr.CheckboxGroup(value=all_categories),
-                outputs=category_selector
-            )
-            select_default_btn.click(
-                lambda: gr.CheckboxGroup(value=default_categories),
-                outputs=category_selector
-            )
-            deselect_all_btn.click(
-                lambda: gr.CheckboxGroup(value=[]),
-                outputs=category_selector
-            )
+                    gr.Markdown("### 설정")
+                    with gr.Row():
+                        oy_max_items = gr.Number(label="카테고리당 최대 아이템 수", value=1, precision=0)
+                        oy_output_filename = gr.Textbox(label="출력 파일명", value="oliveyoung_products_0812.xlsx")
+                    oy_save_db = gr.Checkbox(label="PostgreSQL에도 저장", value=False)
+                    with gr.Row():
+                        oy_crawl_btn = gr.Button("크롤링 시작", variant="primary", scale=4)
+                        oy_stop_btn = gr.Button("중지", variant="stop", scale=1)
+                    oy_crawl_output = gr.Textbox(label="실행 결과", lines=15, max_lines=30, autoscroll=True)
 
-            gr.Markdown("---")
-            gr.Markdown("### 전체 카테고리 크롤링")
-            with gr.Row():
-                oy_max_items = gr.Number(label="카테고리당 최대 아이템 수", value=1, precision=0)
-                oy_output_filename = gr.Textbox(label="출력 파일명", value="oliveyoung_products_0812.xlsx")
-            oy_save_db = gr.Checkbox(label="PostgreSQL에도 저장", value=False)
-            with gr.Row():
-                oy_crawl_btn = gr.Button("크롤링 시작", variant="primary", scale=4)
-                oy_stop_btn = gr.Button("중지", variant="stop", scale=1)
-            oy_crawl_output = gr.Textbox(label="실행 결과", lines=15, max_lines=30, autoscroll=True)
+                    oy_crawl_btn.click(
+                        oliveyoung_crawl,
+                        inputs=[oy_max_items, oy_output_filename, oy_save_db, category_full],
+                        outputs=oy_crawl_output,
+                        show_progress="full"
+                    )
+                    oy_stop_btn.click(
+                        lambda: stop_process("oliveyoung_crawl"),
+                        outputs=oy_crawl_output
+                    )
 
-            oy_crawl_btn.click(
-                oliveyoung_crawl,
-                inputs=[oy_max_items, oy_output_filename, oy_save_db, category_selector],
-                outputs=oy_crawl_output,
-                show_progress="full"
-            )
-            oy_stop_btn.click(
-                lambda: stop_process("oliveyoung_crawl"),
-                outputs=oy_crawl_output
-            )
+                # 새상품 크롤링 탭
+                with gr.Tab("새상품 크롤링"):
+                    with gr.Accordion("📋 카테고리 선택", open=False):
+                        gr.Markdown("크롤링할 카테고리를 선택하세요.")
+                        with gr.Row():
+                            select_all_new = gr.Button("전체 선택", scale=1)
+                            select_default_new = gr.Button("기본값으로", scale=1)
+                            deselect_all_new = gr.Button("전체 해제", scale=1)
 
-            gr.Markdown("---")
-            gr.Markdown("### 새상품 크롤링 (DB 기반)")
-            gr.Markdown("crawled_products 테이블에서 중복을 확인하여 새상품만 크롤링합니다.")
-            oy_db_max_items = gr.Number(label="카테고리당 최대 아이템 수", value=15, precision=0)
-            with gr.Row():
-                oy_db_crawl_btn = gr.Button("DB 기반 새상품 크롤링 시작", variant="primary", scale=4)
-                oy_db_stop_btn = gr.Button("중지", variant="stop", scale=1)
-            oy_db_crawl_output = gr.Textbox(label="실행 결과", lines=15, max_lines=30, autoscroll=True)
+                        category_new = gr.CheckboxGroup(
+                            choices=all_categories,
+                            value=default_categories,
+                            label="크롤링할 카테고리",
+                            info="✅ 체크된 카테고리만 크롤링됩니다"
+                        )
 
-            oy_db_crawl_btn.click(
-                oliveyoung_crawl_new_from_db,
-                inputs=[oy_db_max_items, category_selector],
-                outputs=oy_db_crawl_output,
-                show_progress="full"
-            )
-            oy_db_stop_btn.click(
-                lambda: stop_process("oliveyoung_crawl_new_db"),
-                outputs=oy_db_crawl_output
-            )
+                        select_all_new.click(
+                            lambda: gr.CheckboxGroup(value=all_categories),
+                            outputs=category_new
+                        )
+                        select_default_new.click(
+                            lambda: gr.CheckboxGroup(value=default_categories),
+                            outputs=category_new
+                        )
+                        deselect_all_new.click(
+                            lambda: gr.CheckboxGroup(value=[]),
+                            outputs=category_new
+                        )
 
-            gr.Markdown("---")
-            gr.Markdown("### 최신 상품만 크롤링 (Excel 기반)")
-            with gr.Row():
-                oy_existing_excel = gr.Textbox(label="기존 Excel 파일 경로", value="data/oliveyoung_20250929.xlsx")
-                oy_new_max_items = gr.Number(label="카테고리당 최대 아이템 수", value=15, precision=0)
-            with gr.Row():
-                oy_new_output_filename = gr.Textbox(label="출력 파일명", value="oliveyoung_new_products.xlsx")
-                oy_new_save_db = gr.Checkbox(label="PostgreSQL에도 저장", value=False)
-            with gr.Row():
-                oy_new_crawl_btn = gr.Button("최신 상품 크롤링 시작", variant="primary", scale=4)
-                oy_new_stop_btn = gr.Button("중지", variant="stop", scale=1)
-            oy_new_crawl_output = gr.Textbox(label="실행 결과", lines=15, max_lines=30, autoscroll=True)
+                    gr.Markdown("### 데이터 소스 선택")
+                    new_source = gr.Radio(
+                        choices=["Excel 기반", "DB 기반"],
+                        value="Excel 기반",
+                        label="비교 기준",
+                        info="Excel: 기존 Excel 파일과 비교 | DB: PostgreSQL crawled_products 테이블과 비교"
+                    )
 
-            oy_new_crawl_btn.click(
-                oliveyoung_crawl_new,
-                inputs=[oy_existing_excel, oy_new_max_items, oy_new_output_filename, oy_new_save_db, category_selector],
-                outputs=oy_new_crawl_output,
-                show_progress="full"
-            )
-            oy_new_stop_btn.click(
-                lambda: stop_process("oliveyoung_crawl_new"),
-                outputs=oy_new_crawl_output
-            )
+                    # Excel 기반 설정
+                    with gr.Group(visible=True) as excel_group:
+                        gr.Markdown("#### Excel 기반 설정")
+                        with gr.Row():
+                            oy_existing_excel = gr.Textbox(label="기존 Excel 파일 경로", value="data/oliveyoung_20250929.xlsx")
+                            oy_new_max_items = gr.Number(label="카테고리당 최대 아이템 수", value=15, precision=0)
+                        oy_new_output_filename = gr.Textbox(label="출력 파일명", value="oliveyoung_new_products.xlsx")
+
+                    # DB 기반 설정
+                    with gr.Group(visible=False) as db_group:
+                        gr.Markdown("#### DB 기반 설정")
+                        gr.Markdown("crawled_products 테이블에서 중복을 확인하여 새상품만 크롤링합니다.")
+                        oy_db_max_items = gr.Number(label="카테고리당 최대 아이템 수", value=15, precision=0)
+
+                    def update_source_visibility(source):
+                        if source == "Excel 기반":
+                            return gr.Group(visible=True), gr.Group(visible=False)
+                        else:
+                            return gr.Group(visible=False), gr.Group(visible=True)
+
+                    new_source.change(
+                        update_source_visibility,
+                        inputs=[new_source],
+                        outputs=[excel_group, db_group]
+                    )
+
+                    with gr.Row():
+                        oy_new_crawl_btn = gr.Button("새상품 크롤링 시작", variant="primary", scale=4)
+                        oy_new_stop_btn = gr.Button("중지", variant="stop", scale=1)
+                    oy_new_crawl_output = gr.Textbox(label="실행 결과", lines=15, max_lines=30, autoscroll=True)
+
+                    def new_crawl_wrapper(source, existing_excel, new_max_items, new_output_filename, db_max_items, category_new):
+                        if source == "Excel 기반":
+                            return oliveyoung_crawl_new(existing_excel, new_max_items, new_output_filename, False, category_new)
+                        else:
+                            return oliveyoung_crawl_new_from_db(db_max_items, category_new)
+
+                    oy_new_crawl_btn.click(
+                        new_crawl_wrapper,
+                        inputs=[new_source, oy_existing_excel, oy_new_max_items, oy_new_output_filename, oy_db_max_items, category_new],
+                        outputs=oy_new_crawl_output,
+                        show_progress="full"
+                    )
+                    oy_new_stop_btn.click(
+                        lambda: stop_process("oliveyoung_crawl_new"),
+                        outputs=oy_new_crawl_output
+                    )
 
         # Oliveyoung 업로드 탭
         with gr.Tab("📤 Oliveyoung 업로드 변환"):
